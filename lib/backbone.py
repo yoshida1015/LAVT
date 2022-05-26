@@ -7,9 +7,6 @@ from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from .mmcv_custom import load_checkpoint
 from mmseg.utils import get_root_logger
 
-from lambda_networks import LambdaLayer
-from .CoaT.src.models.coat import CoaT
-
 class Mlp(nn.Module):
     """ Multilayer perceptron."""
 
@@ -185,15 +182,6 @@ class SwinTransformerBlock(nn.Module):
         self.H = None
         self.W = None
 
-        #self.Lambda = LambdaLayer(
-        #    dim = dim // num_heads,     # channels going in
-        #    dim_out = dim // num_heads, # channels out
-        #    n = 30,    # size of the receptive window - max(height, width)
-        #    dim_k = dim // num_heads,   # key dimension
-        #    heads = num_heads,          # number of heads, for multi-query
-        #    dim_u = 1                   # 'intra-depth' dimension
-        #)
-
     def forward(self, x, mask_matrix):
         """ Forward function.
 
@@ -244,13 +232,6 @@ class SwinTransformerBlock(nn.Module):
 
         if pad_r > 0 or pad_b > 0:
             x = x[:, :H, :W, :].contiguous()
-
-        #x = x.view(B, C, H, W)
-        #print(f"B:{B}")
-        #print(f"C:{C}")
-        #print(f"H:{H}")
-        #print(f"W:{W}")
-        #x = self.Lambda(x)
         
         x = x.view(B, H * W, C)
 
@@ -549,19 +530,6 @@ class MMBasicLayer(nn.Module):
                 drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
                 norm_layer=norm_layer)
             for i in range(depth)])
-        ######
-        self.coat_blocks = nn.ModuleList([
-            CoaT(
-                patch_size=4, 
-                embed_dims=[64, 128, 256, 320], 
-                serial_depths=[2, 2, 2, 2], 
-                parallel_depth=0, 
-                num_heads=8, 
-                mlp_ratios=[8, 8, 4, 4], 
-                )
-                #**kwargs)
-            for i in range(depth)])
-        ######
 
         # fuse before downsampling
         self.fusion = PWAM(dim,  # both the visual input and for combining, num of channels
@@ -616,19 +584,12 @@ class MMBasicLayer(nn.Module):
         attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
         attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
 
-        #for blk in self.blocks:
-        #    blk.H, blk.W = H, W
-        #    if self.use_checkpoint:
-        #        x = checkpoint.checkpoint(blk, x, attn_mask)
-        #    else:
-        #        x = blk(x, attn_mask)  # output of a Block has shape (B, H*W, dim)
-
-        for blk in self.coat_blocks:
+        for blk in self.blocks:
             blk.H, blk.W = H, W
             if self.use_checkpoint:
                 x = checkpoint.checkpoint(blk, x, attn_mask)
             else:
-                x = blk(x)  # output of a Block has shape (B, H*W, dim)
+                x = blk(x, attn_mask)  # output of a Block has shape (B, H*W, dim)
 
         # PWAM fusion
         x_residual = self.fusion(x, l, l_mask)
