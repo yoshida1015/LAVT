@@ -211,6 +211,7 @@ def init_distributed_mode(args):
         rank = -1
         world_size = -1
 
+    print(args.local_rank)
     torch.cuda.set_device(args.local_rank)
     torch.distributed.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=rank)
     torch.distributed.barrier()

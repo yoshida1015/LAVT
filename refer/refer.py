@@ -39,7 +39,7 @@ from pycocotools import mask
 
 class REFER:
 
-    def __init__(self, data_root, dataset='refcoco', splitBy='unc'):
+    def __init__(self, data_root, dataset='refcoco', splitBy='unc', disc_data=False):
         # provide data_root folder which contains refclef, refcoco, refcoco+ and refcocog
         # also provide dataset name and splitBy information
         # e.g., dataset = 'refcoco', splitBy = 'unc'
@@ -52,21 +52,57 @@ class REFER:
             self.IMAGE_DIR = osp.join(data_root, 'images/mscoco/images/train2014')
         elif dataset == 'refclef':
             self.IMAGE_DIR = osp.join(data_root, 'images/saiapr_tc-12')
+        elif dataset == 'reverie':
+            #self.IMAGE_DIR = osp.join(data_root, 'images/reverie_images/raw_img')
+            self.IMAGE_DIR = osp.join(data_root, 'images/reverie_images/')
         else:
             print('No refer dataset is called [%s]' % dataset)
             sys.exit()
 
         # load refs from data/dataset/refs(dataset).json
         tic = time.time()
-        ref_file = osp.join(self.DATA_DIR, 'refs(' + splitBy + ').p')
+        if dataset == 'reverie':
+            ref_file = osp.join(self.DATA_DIR, "reverie_ref.json")
+        else:
+            ref_file = osp.join(self.DATA_DIR, 'refs(' + splitBy + ').p')
         self.data = {}
         self.data['dataset'] = dataset
         f = open(ref_file, 'r')
-        self.data['refs'] = pickle.load(open(ref_file, 'rb'))
+
+        print(f"discount data : {disc_data}")
+        if disc_data:
+            if dataset == 'reverie':
+                refs_data = json.load(open(ref_file, 'rb'))
+            else:
+                refs_data = pickle.load(open(ref_file, 'rb'))
+            ids_path = osp.join(self.DATA_DIR, 'ids_list.json')
+            ids_list = json.load(open(ids_path, 'r'))
+            refs_data_tmp = refs_data
+            for i, ref in reversed(list(enumerate(refs_data_tmp))):
+                img_id = ref['image_id']
+                ant_id = ref['ann_id']
+                ctg_id = ref['category_id']
+                if img_id not in ids_list["img"] or ant_id not in ids_list["ant"] \
+                   or ctg_id not in ids_list["ctg"]:
+                    del refs_data[i]
+            self.data['refs'] = refs_data
+        else:
+            if dataset == 'reverie':
+                self.data['refs'] = json.load(open(ref_file, 'rb'))
+            else:
+                self.data['refs'] = pickle.load(open(ref_file, 'rb'))
+            #with open("test.txt", "w") as f:
+            #    print(self.data['refs'], file=f)
 
         # load annotations from data/dataset/instances.json
-        instances_file = osp.join(self.DATA_DIR, 'instances.json')
+        if disc_data:
+            instances_file = osp.join(self.DATA_DIR, 'disc_inst.json')
+        elif dataset == 'reverie':
+            instances_file = osp.join(self.DATA_DIR, 'reverie_ant.json')
+        else:
+            instances_file = osp.join(self.DATA_DIR, 'instances.json')
         instances = json.load(open(instances_file, 'r'))
+
         self.data['images'] = instances['images']
         self.data['annotations'] = instances['annotations']
         self.data['categories'] = instances['categories']
@@ -103,6 +139,7 @@ class REFER:
         # fetch info from refs
         Refs, imgToRefs, refToAnn, annToRef, catToRefs = {}, {}, {}, {}, {}
         Sents, sentToRef, sentToTokens = {}, {}, {}
+
         for ref in self.data['refs']:
             # ids
             ref_id = ref['ref_id']

@@ -1,0 +1,17 @@
+checkpoints/
+*.zip
+data/
+!data/dataset_refer_bert.py
+log/
+loss/
+models/
+*.jpg
+qualitative_images/
+seg_check/
+wandb/
+refer/data/
+lib/CoaT/
+pretrained_weights/
+__pycache__/
+
+

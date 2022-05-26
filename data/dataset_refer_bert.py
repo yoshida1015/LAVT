@@ -34,7 +34,7 @@ class ReferDataset(data.Dataset):
         self.image_transforms = image_transforms
         self.target_transform = target_transforms
         self.split = split
-        self.refer = REFER(args.refer_data_root, args.dataset, args.splitBy)
+        self.refer = REFER(args.refer_data_root, args.dataset, args.splitBy, args.disc_data)
 
         self.max_tokens = 20
 
@@ -118,4 +118,6 @@ class ReferDataset(data.Dataset):
             tensor_embeddings = self.input_ids[index][choice_sent]
             attention_mask = self.attention_masks[index][choice_sent]
 
-        return img, target, tensor_embeddings, attention_mask
+        img_fname = this_img['file_name']
+
+        return img, target, tensor_embeddings, attention_mask, img_fname

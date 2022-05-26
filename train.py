@@ -22,6 +22,10 @@ import torch.nn.functional as F
 import gc
 from collections import OrderedDict
 
+import wandb
+
+#from focal_loss_pytorch.focalloss import FocalLoss
+#from DiceLoss_PyTorch.loss import DiceLoss
 
 def get_dataset(image_set, transform, args):
     from data.dataset_refer_bert import ReferDataset
@@ -63,6 +67,72 @@ def criterion(input, target):
     weight = torch.FloatTensor([0.9, 1.1]).cuda()
     return nn.functional.cross_entropy(input, target, weight=weight)
 
+def calc_loss(input, target, loss_func):
+    bkg, obj = torch.split(input, 1, dim=1)
+    loss = loss_func(bkg.squeeze(), (target-1)*-1) + loss_func(obj.squeeze(), target)
+    return loss
+
+
+##### dice loss ####
+#def dice_loss(pred, target, smooth = 1.):
+#    pred = pred.contiguous()
+#    target = target.contiguous()
+#    intersection = (pred * target).sum(dim=2).sum(dim=2)
+#    loss = (1 - ((2. * intersection + smooth) / (pred.sum(dim=2).sum(dim=2) + target.sum(dim=2).sum(dim=2) + smooth)))
+#    return loss.mean()
+#
+##### dice + CE ####
+#def dice_ce_loss(pred, target, metrics=None, bce_weight=0.5):
+#    # Dice LossとCategorical Cross Entropyを混ぜていい感じにしている
+#    bce = F.binary_cross_entropy_with_logits(pred, target)
+#    pred = torch.sigmoid(pred)
+#    dice = dice_loss(pred, target)
+#    loss = bce * bce_weight + dice * (1 - bce_weight)
+#    return loss
+
+def dice_loss(inputs, targets):
+    """
+    Compute the DICE loss, similar to generalized IOU for masks
+    Args:
+        inputs: A float tensor of arbitrary shape.
+                The predictions for each example.
+        targets: A float tensor with the same shape as inputs. Stores the binary
+                 classification label for each element in inputs
+                (0 for the negative class and 1 for the positive class).
+    """
+    inputs = inputs.sigmoid()
+    #inputs = inputs.flatten(0)
+    numerator = 2 * (inputs * targets).sum(1)
+    denominator = inputs.sum(-1) + targets.sum(-1)
+    loss = 1 - (numerator + 1) / (denominator + 1)
+    return loss.sum()
+
+def sigmoid_focal_loss(inputs, targets, alpha: float = 0.25, gamma: float = 2):
+    """
+    Loss used in RetinaNet for dense detection: https://arxiv.org/abs/1708.02002.
+    Args:
+        inputs: A float tensor of arbitrary shape.
+                The predictions for each example.
+        targets: A float tensor with the same shape as inputs. Stores the binary
+                 classification label for each element in inputs
+                (0 for the negative class and 1 for the positive class).
+        alpha: (optional) Weighting factor in range (0,1) to balance
+                positive vs negative examples. Default = -1 (no weighting).
+        gamma: Exponent of the modulating factor (1 - p_t) to
+               balance easy vs hard examples.
+    Returns:
+        Loss tensor
+    """
+    prob = inputs.sigmoid()
+    ce_loss = F.binary_cross_entropy_with_logits(inputs.float(), targets.float(), reduction="none")
+    p_t = prob * targets + (1 - prob) * (1 - targets)
+    loss = ce_loss * ((1 - p_t) ** gamma)
+
+    if alpha >= 0:
+        alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
+        loss = alpha_t * loss
+
+    return loss.mean(1).sum()
 
 def evaluate(model, data_loader, bert_model):
     model.eval()
@@ -81,7 +151,7 @@ def evaluate(model, data_loader, bert_model):
     with torch.no_grad():
         for data in metric_logger.log_every(data_loader, 100, header):
             total_its += 1
-            image, target, sentences, attentions = data
+            image, target, sentences, attentions, _ = data
             image, target, sentences, attentions = image.cuda(non_blocking=True),\
                                                    target.cuda(non_blocking=True),\
                                                    sentences.cuda(non_blocking=True),\
@@ -130,7 +200,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
 
     for data in metric_logger.log_every(data_loader, print_freq, header):
         total_its += 1
-        image, target, sentences, attentions = data
+        image, target, sentences, attentions, _ = data
         image, target, sentences, attentions = image.cuda(non_blocking=True),\
                                                target.cuda(non_blocking=True),\
                                                sentences.cuda(non_blocking=True),\
@@ -144,11 +214,15 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
         attentions = attentions.unsqueeze(dim=-1)  # (batch, N_l, 1)
         output = model(image, embedding, l_mask=attentions)
 
-        loss = criterion(output, target)
+        #loss = criterion(output, target)
+        #loss = calc_loss(output, target, dice_loss)
+        loss = calc_loss(output, target, sigmoid_focal_loss)
         optimizer.zero_grad()  # set_to_none=True is only available in pytorch 1.6+
         loss.backward()
         optimizer.step()
         lr_scheduler.step()
+
+        wandb.log({'train_loss':loss.item()})
 
         train_loss += loss.item()
         iterations += 1
@@ -159,7 +233,11 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
         torch.cuda.empty_cache()
 
 
+
+
 def main(args):
+    wandb.init(name=args.run_id, project='lavt')
+
     dataset, num_classes = get_dataset("train",
                                        get_transform(args=args),
                                        args=args)
@@ -245,6 +323,7 @@ def main(args):
                         iterations, bert_model)
 
         iou, overallIoU = evaluate(model, data_loader_test, bert_model)
+        wandb.log({'oIoU':overallIoU})
 
         print('Average object IoU {}'.format(iou))
         print('Overall IoU {}'.format(overallIoU))

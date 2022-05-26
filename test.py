@@ -18,6 +18,12 @@ from PIL import Image
 import torch.nn.functional as F
 
 
+from bert.tokenization_bert import BertTokenizer
+from args import get_parser
+import matplotlib.pyplot as plt
+
+
+
 def get_dataset(image_set, transform, args):
     from data.dataset_refer_bert import ReferDataset
     ds = ReferDataset(args,
@@ -30,10 +36,22 @@ def get_dataset(image_set, transform, args):
     return ds, num_classes
 
 
+def imshow(img):
+    npimg = img.numpy()
+    plt.imshow(np.transpose(npimg, (1, 2, 0)))
+
+def unnorm(img, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
+    for t, m, s in zip(img, mean, std):
+        t.mul_(s).add_(m)
+    return img 
+
 def evaluate(model, data_loader, bert_model, device):
     model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ")
 
+    tokenizer = BertTokenizer.from_pretrained(args.bert_tokenizer)               
+    count = 0
+    s_count = 0
     # evaluation variables
     cum_I, cum_U = 0, 0
     eval_seg_iou_list = [.5, .6, .7, .8, .9]
@@ -44,7 +62,7 @@ def evaluate(model, data_loader, bert_model, device):
 
     with torch.no_grad():
         for data in metric_logger.log_every(data_loader, 100, header):
-            image, target, sentences, attentions = data
+            image, target, sentences, attentions, img_fname = data
             image, target, sentences, attentions = image.to(device), target.to(device), \
                                                    sentences.to(device), attentions.to(device)
             sentences = sentences.squeeze(1)
@@ -56,11 +74,43 @@ def evaluate(model, data_loader, bert_model, device):
                 output = model(image, embedding, l_mask=attentions[:, :, j].unsqueeze(-1))
                 output = output.cpu()
                 output_mask = output.argmax(1).data.numpy()
+                #mask0 = output[0][0].data.numpy()
+                #mask1 = output[0][1].data.numpy()
+
                 I, U = computeIoU(output_mask, target)
                 if U == 0:
                     this_iou = 0.0
                 else:
                     this_iou = I*1.0/U
+
+                ### save img and inst
+                if args.visualize:
+                    inst = tokenizer.decode(sentences[:, :, j][0])
+                    image_name = str(count)+ "_" + img_fname[0][5:-4]
+                    imshow(torchvision.utils.make_grid(unnorm(image[0].cpu())))
+                    plt.axis("off")
+                    plt.savefig(args.visual_dir + image_name, bbox_inches="tight", pad_inches=0.0)
+                    plt.imshow(output_mask[0])
+                    plt.axis("off")
+                    plt.savefig(args.visual_dir + image_name[:-4] + "_mask" + ".jpg", \
+                        bbox_inches="tight", pad_inches=0.0)
+                    plt.imshow(target[0])
+                    plt.axis("off")
+                    plt.savefig(args.visual_dir + image_name[:-4] + "_targ" + ".jpg", \
+                        bbox_inches="tight", pad_inches=0.0)
+                    #plt.imshow(mask0)
+                    #plt.axis("off")
+                    #plt.savefig(args.visual_dir + image_name + "_mask0" + ".jpg", \
+                    #    bbox_inches="tight", pad_inches=0.0)
+                    #plt.imshow(mask1)
+                    #plt.axis("off")
+                    #plt.savefig(args.visual_dir + image_name + "_mask1" + ".jpg", \
+                    #    bbox_inches="tight", pad_inches=0.0)
+                    count += 1
+
+                    with open(f"{args.visual_dir}rev_fail.txt", mode='a') as f:
+                        print(f"{image_name};iou:{this_iou};sentence:{inst}", file=f)
+                
                 mean_IoU.append(this_iou)
                 cum_I += I
                 cum_U += U
