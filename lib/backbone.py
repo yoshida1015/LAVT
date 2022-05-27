@@ -432,6 +432,14 @@ class MultiModalSwinTransformer(nn.Module):
             self.add_module(layer_name, layer)
 
         self._freeze_stages()
+        self.coat_blocks = CoaT(
+                patch_size=4, 
+                embed_dims=[64, 128, 256, 320], 
+                serial_depths=[2, 2, 2, 2], 
+                parallel_depth=0, 
+                num_heads=8, 
+                mlp_ratios=[8, 8, 4, 4], 
+                )
 
     def _freeze_stages(self):
         if self.frozen_stages >= 0:
@@ -478,28 +486,30 @@ class MultiModalSwinTransformer(nn.Module):
 
     def forward(self, x, l, l_mask):
         """Forward function."""
-        x = self.patch_embed(x)
+        ###x = self.patch_embed(x)
 
-        Wh, Ww = x.size(2), x.size(3)
-        if self.ape:
-            # interpolate the position embedding to the corresponding size
-            absolute_pos_embed = F.interpolate(self.absolute_pos_embed, size=(Wh, Ww), mode='bicubic')
-            x = (x + absolute_pos_embed).flatten(2).transpose(1, 2)  # B Wh*Ww C
-        else:
-            x = x.flatten(2).transpose(1, 2)
-        x = self.pos_drop(x)
+        ###Wh, Ww = x.size(2), x.size(3)
+        ###if self.ape:
+        ###    # interpolate the position embedding to the corresponding size
+        ###    absolute_pos_embed = F.interpolate(self.absolute_pos_embed, size=(Wh, Ww), mode='bicubic')
+        ###    x = (x + absolute_pos_embed).flatten(2).transpose(1, 2)  # B Wh*Ww C
+        ###else:
+        ###    x = x.flatten(2).transpose(1, 2)
+        ###x = self.pos_drop(x)
 
-        outs = []
-        for i in range(self.num_layers):
-            layer = self.layers[i]
-            x_out, H, W, x, Wh, Ww = layer(x, Wh, Ww, l, l_mask)
+        #outs = []
+        outs = self.coat_blocks(x, l, l_mask)
+        #for i in range(self.num_layers):
+        #    Wh, Ww = x.size(2), x.size(3)
+        #    layer = self.layers[i]
+        #    x_out, H, W, x, Wh, Ww = layer(x, Wh, Ww, l, l_mask)
 
-            if i in self.out_indices:
-                norm_layer = getattr(self, f'norm{i}')
-                x_out = norm_layer(x_out)  # output of a Block has shape (B, H*W, dim)
+        #    if i in self.out_indices:
+        #        norm_layer = getattr(self, f'norm{i}')
+        #        x_out = norm_layer(x_out)  # output of a Block has shape (B, H*W, dim)
 
-                out = x_out.view(-1, H, W, self.num_features[i]).permute(0, 3, 1, 2).contiguous()
-                outs.append(out)
+        #        out = x_out.view(-1, H, W, self.num_features[i]).permute(0, 3, 1, 2).contiguous()
+        #        outs.append(out)
 
         return tuple(outs)
 
@@ -550,8 +560,18 @@ class MMBasicLayer(nn.Module):
                 norm_layer=norm_layer)
             for i in range(depth)])
         ######
-        self.coat_blocks = nn.ModuleList([
-            CoaT(
+        #self.coat_blocks = nn.ModuleList([
+        #    CoaT(
+        #        patch_size=4, 
+        #        embed_dims=[64, 128, 256, 320], 
+        #        serial_depths=[2, 2, 2, 2], 
+        #        parallel_depth=0, 
+        #        num_heads=8, 
+        #        mlp_ratios=[8, 8, 4, 4], 
+        #        )
+        #        #**kwargs)
+        #    for i in range(depth)])
+        self.coat_blocks = CoaT(
                 patch_size=4, 
                 embed_dims=[64, 128, 256, 320], 
                 serial_depths=[2, 2, 2, 2], 
@@ -560,7 +580,6 @@ class MMBasicLayer(nn.Module):
                 mlp_ratios=[8, 8, 4, 4], 
                 )
                 #**kwargs)
-            for i in range(depth)])
         ######
 
         # fuse before downsampling
@@ -623,12 +642,13 @@ class MMBasicLayer(nn.Module):
         #    else:
         #        x = blk(x, attn_mask)  # output of a Block has shape (B, H*W, dim)
 
-        for blk in self.coat_blocks:
-            blk.H, blk.W = H, W
-            if self.use_checkpoint:
-                x = checkpoint.checkpoint(blk, x, attn_mask)
-            else:
-                x = blk(x)  # output of a Block has shape (B, H*W, dim)
+        #for blk in self.coat_blocks:
+        #    blk.H, blk.W = H, W
+        #    if self.use_checkpoint:
+        #        x = checkpoint.checkpoint(blk, x, attn_mask)
+        #    else:
+        #        x = blk(x, l, l_mask)  # output of a Block has shape (B, H*W, dim)
+        x = self.coat_blocks(x, l, l_mask)  # output of a Block has shape (B, H*W, dim)
 
         # PWAM fusion
         x_residual = self.fusion(x, l, l_mask)
