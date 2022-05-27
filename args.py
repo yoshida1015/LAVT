@@ -34,8 +34,13 @@ def get_parser():
                         help='change to umd or google when the dataset is G-Ref (RefCOCOg)')
     parser.add_argument('--swin_type', default='base',
                         help='tiny, small, base, or large variants of the Swin Transformer')
+    parser.add_argument('--coat_type', default='lite_tiny',
+                        help='tiny, mini, small, lite_tiny, lite_mini, lite_samll \
+                              or large variants of the CoaT')
     parser.add_argument('--pretrained_swin_weights', default='',
                         help='path to pre-trained Swin backbone weights')
+    parser.add_argument('--pretrained_weights', default='',
+                        help='path to pre-trained backbone weights')
     parser.add_argument('--ddp_trained_weights', action='store_true',
                         help='Only needs specified when testing,'
                              'whether the weights to be loaded are from a DDP-trained model')

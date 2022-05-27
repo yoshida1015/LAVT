@@ -1,39 +1,31 @@
 import torch
 import torch.nn as nn
-from .mask_predictor import SimpleDecoding
-from .backbone import MultiModalSwinTransformer
+from .mask_predictor import SimpleDecoding_CoaT
+from .backbone import MultiModalCoaT
 from ._utils import LAVT
 
-__all__ = ['lavt', 'coat']
+__all__ = ['lavt']
 
 
 # LAVT
 def _segm_lavt(pretrained, args):
     # initialize the SwinTransformer backbone with the specified version
-    if args.swin_type == 'tiny':
-        embed_dim = 96
-        depths = [2, 2, 6, 2]
-        num_heads = [3, 6, 12, 24]
-    elif args.swin_type == 'small':
-        embed_dim = 96
-        depths = [2, 2, 18, 2]
-        num_heads = [3, 6, 12, 24]
-    elif args.swin_type == 'base':
-        embed_dim = 128
-        depths = [2, 2, 18, 2]
-        num_heads = [4, 8, 16, 32]
-    elif args.swin_type == 'large':
-        embed_dim = 192
-        depths = [2, 2, 18, 2]
-        num_heads = [6, 12, 24, 48]
+    if args.coat_type == 'tiny':
+        embed_dims=[152, 152, 152, 152]
+    elif args.coat_type == 'mini':
+        embed_dims=[152, 216, 216, 216]
+    elif args.coat_type == 'small':
+        embed_dims=[152, 320, 320, 320]
+    elif args.coat_type == 'lite_tiny':
+        embed_dims=[64, 128, 256, 320]
+    elif args.coat_type == 'lite_mini':
+        embed_dims=[64, 128, 320, 512]
+    elif args.coat_type == 'lite_small':
+        embed_dims=[64, 128, 320, 512]
+    elif args.coat_type == 'lite_medium':
+        embed_dims=[128, 256, 320, 512]
     else:
         assert False
-    # args.window12 added for test.py because state_dict is loaded after model initialization
-    if 'window12' in pretrained or args.window12:
-        print('Window size 12!')
-        window_size = 12
-    else:
-        window_size = 7
 
     if args.mha:
         mha = args.mha.split('-')  # if non-empty, then ['a', 'b', 'c', 'd']
@@ -42,24 +34,18 @@ def _segm_lavt(pretrained, args):
         mha = [1, 1, 1, 1]
 
     out_indices = (0, 1, 2, 3)
-    backbone = MultiModalSwinTransformer(embed_dim=embed_dim, depths=depths, num_heads=num_heads,
-                                         window_size=window_size,
-                                         ape=False, drop_path_rate=0.3, patch_norm=True,
-                                         out_indices=out_indices,
-                                         use_checkpoint=False, num_heads_fusion=mha,
-                                         fusion_drop=args.fusion_drop
-                                         )
+    backbone = MultiModalCoaT(use_checkpoint=False, coat_type=args.coat_type)
+
     if pretrained:
-        print('Initializing Multi-modal Swin Transformer weights from ' + pretrained)
+        print('Initializing Multi-modal CoaT weights from ' + pretrained)
         backbone.init_weights(pretrained=pretrained)
     else:
-        print('Randomly initialize Multi-modal Swin Transformer weights.')
+        print('Randomly initialize Multi-modal CoaT weights.')
         backbone.init_weights()
 
-    model_map = [SimpleDecoding, LAVT]
+    model_map = [SimpleDecoding_CoaT, LAVT]
 
-    #classifier = model_map[0](8*embed_dim)
-    classifier = model_map[0]([64, 128, 256, 320])
+    classifier = model_map[0](embed_dims)
     base_model = model_map[1]
 
     model = base_model(backbone, classifier)

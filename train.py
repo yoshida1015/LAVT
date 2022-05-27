@@ -215,9 +215,9 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
         output = model(image, embedding, l_mask=attentions)
 
         #torch.autograd.set_detect_anomaly(True)
-        #loss = criterion(output, target)
+        loss = criterion(output, target)
         #loss = calc_loss(output, target, dice_loss)
-        loss = calc_loss(output, target, sigmoid_focal_loss)
+        #loss = calc_loss(output, target, sigmoid_focal_loss)
         #loss = criterion(output, target) + calc_loss(output, target, sigmoid_focal_loss)
         optimizer.zero_grad()  # set_to_none=True is only available in pytorch 1.6+
         loss.backward()
@@ -262,7 +262,7 @@ def main(args):
         dataset_test, batch_size=1, sampler=test_sampler, num_workers=args.workers)
 
     print(args.model)
-    model = segmentation.__dict__[args.model](pretrained=args.pretrained_swin_weights,
+    model = segmentation.__dict__[args.model](pretrained=args.pretrained_weights,
                                               args=args)
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model.cuda()
