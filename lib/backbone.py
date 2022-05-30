@@ -26,6 +26,7 @@ class MultiModalCoaT(nn.Module):
         elif coat_type == 'small':
             self.coat = coat_small()
         elif coat_type == 'lite_tiny':
+            print("LITE TINY")
             self.coat = coat_lite_tiny()
         elif coat_type == 'lite_mini':
             self.coat = coat_lite_mini()
@@ -63,7 +64,11 @@ class MultiModalCoaT(nn.Module):
         if isinstance(pretrained, str):
             self.apply(_init_weights)
             logger = get_root_logger()
-            load_checkpoint(self, pretrained, strict=('upernet' in pretrained), logger=logger)
+            #load_checkpoint(self, pretrained, strict=('upernet' in pretrained), logger=logger)
+            checkpoint = torch.load(pretrained)
+            print(f"SELF:{self}")
+            self.coat.load_state_dict(checkpoint['model'])
+            
         elif pretrained is None:
             self.apply(_init_weights)
         else:
@@ -72,6 +77,7 @@ class MultiModalCoaT(nn.Module):
     def forward(self, x, l, l_mask):
         """Forward function."""
         outs = self.coat(x, l, l_mask)
+        #outs = self.coat(x)
         return tuple(outs)
 
     def train(self, mode=True):
