@@ -35,13 +35,14 @@ def _segm_lavt(pretrained, args):
 
     out_indices = (0, 1, 2, 3)
     backbone = MultiModalCoaT(use_checkpoint=False, coat_type=args.coat_type)
+    backbone.init_weights(pretrained=pretrained)
 
-    if pretrained:
-        print('Initializing Multi-modal CoaT weights from ' + pretrained)
-        backbone.init_weights(pretrained=pretrained)
-    else:
-        print('Randomly initialize Multi-modal CoaT weights.')
-        backbone.init_weights()
+    #if pretrained:
+    #    print('Initializing Multi-modal CoaT weights from ' + pretrained)
+    #    backbone.init_weights(pretrained=pretrained)
+    #else:
+    #    print('Randomly initialize Multi-modal CoaT weights.')
+    #    backbone.init_weights()
 
     model_map = [SimpleDecoding_CoaT, LAVT]
 

@@ -36,7 +36,7 @@ class ReferDataset(data.Dataset):
         self.split = split
         self.refer = REFER(args.refer_data_root, args.dataset, args.splitBy, args.disc_data)
 
-        self.max_tokens = 20
+        self.max_tokens = 100
 
         ref_ids = self.refer.getRefIds(split=self.split)
         img_ids = self.refer.getImgIds(ref_ids)
@@ -119,5 +119,6 @@ class ReferDataset(data.Dataset):
             attention_mask = self.attention_masks[index][choice_sent]
 
         img_fname = this_img['file_name']
+        bbox = self.refer.getRefBox(this_ref_id)
 
-        return img, target, tensor_embeddings, attention_mask, img_fname
+        return img, target, tensor_embeddings, attention_mask, img_fname, bbox

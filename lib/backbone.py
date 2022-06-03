@@ -7,6 +7,7 @@ from .mmcv_custom import load_checkpoint
 from mmseg.utils import get_root_logger
 
 from .CoaT.src.models.coat import *
+from .multimodal_coat import *
 
 class MultiModalCoaT(nn.Module):
     def __init__(self,
@@ -26,7 +27,6 @@ class MultiModalCoaT(nn.Module):
         elif coat_type == 'small':
             self.coat = coat_small()
         elif coat_type == 'lite_tiny':
-            print("LITE TINY")
             self.coat = coat_lite_tiny()
         elif coat_type == 'lite_mini':
             self.coat = coat_lite_mini()
@@ -45,39 +45,15 @@ class MultiModalCoaT(nn.Module):
                 param.requires_grad = False
 
     def init_weights(self, pretrained=None):
-        """Initialize the weights in backbone.
-
-        Args:
-            pretrained (str, optional): Path to pre-trained weights.
-                Defaults to None.
-        """
-
-        def _init_weights(m):
-            if isinstance(m, nn.Linear):
-                trunc_normal_(m.weight, std=.02)
-                if isinstance(m, nn.Linear) and m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.LayerNorm):
-                nn.init.constant_(m.bias, 0)
-                nn.init.constant_(m.weight, 1.0)
-
-        if isinstance(pretrained, str):
-            self.apply(_init_weights)
-            logger = get_root_logger()
-            #load_checkpoint(self, pretrained, strict=('upernet' in pretrained), logger=logger)
-            checkpoint = torch.load(pretrained)
-            print(f"SELF:{self}")
-            self.coat.load_state_dict(checkpoint['model'])
-            
-        elif pretrained is None:
-            self.apply(_init_weights)
-        else:
-            raise TypeError('pretrained must be a str or None')
+        print('Randomly initialize Multi-modal CoaT weights.')
+        self.coat.apply(self.coat._init_weights)
+        if pretrained:
+            print('Loading pretrained CoaT weights from ' + pretrained)
+            self.coat.load_checkpoint(pretrained)
 
     def forward(self, x, l, l_mask):
         """Forward function."""
         outs = self.coat(x, l, l_mask)
-        #outs = self.coat(x)
         return tuple(outs)
 
     def train(self, mode=True):

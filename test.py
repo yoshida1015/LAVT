@@ -1,5 +1,6 @@
 import datetime
 import os
+import os.path as osp
 import time
 
 import torch
@@ -14,7 +15,7 @@ import transforms as T
 import utils
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 import torch.nn.functional as F
 
 
@@ -23,6 +24,15 @@ from args import get_parser
 import matplotlib.pyplot as plt
 
 
+def draw_bb(img_path, bbox, output_pass):
+    img = Image.open(img_path)
+    draw = ImageDraw.Draw(img)
+    #x, y, w, h = bbox
+    #x1, y1 = x+w, y+h
+    x, y, x1, y1 = bbox
+    draw.rectangle((x, y, x1, y1), outline=(255, 0, 0), width=2)
+    img.save(output_pass)
+    
 
 def get_dataset(image_set, transform, args):
     from data.dataset_refer_bert import ReferDataset
@@ -60,9 +70,11 @@ def evaluate(model, data_loader, bert_model, device):
     mean_IoU = []
     header = 'Test:'
 
+    #cnt=0
+    #IMAGE_DIR = osp.join(args.refer_data_root, 'images/reverie_images/')
     with torch.no_grad():
         for data in metric_logger.log_every(data_loader, 100, header):
-            image, target, sentences, attentions, img_fname = data
+            image, target, sentences, attentions, img_fname, bbox = data
             image, target, sentences, attentions = image.to(device), target.to(device), \
                                                    sentences.to(device), attentions.to(device)
             sentences = sentences.squeeze(1)
@@ -74,8 +86,6 @@ def evaluate(model, data_loader, bert_model, device):
                 output = model(image, embedding, l_mask=attentions[:, :, j].unsqueeze(-1))
                 output = output.cpu()
                 output_mask = output.argmax(1).data.numpy()
-                #mask0 = output[0][0].data.numpy()
-                #mask1 = output[0][1].data.numpy()
 
                 I, U = computeIoU(output_mask, target)
                 if U == 0:
@@ -98,18 +108,18 @@ def evaluate(model, data_loader, bert_model, device):
                     plt.axis("off")
                     plt.savefig(args.visual_dir + image_name[:-4] + "_targ" + ".jpg", \
                         bbox_inches="tight", pad_inches=0.0)
-                    #plt.imshow(mask0)
-                    #plt.axis("off")
-                    #plt.savefig(args.visual_dir + image_name + "_mask0" + ".jpg", \
-                    #    bbox_inches="tight", pad_inches=0.0)
-                    #plt.imshow(mask1)
-                    #plt.axis("off")
-                    #plt.savefig(args.visual_dir + image_name + "_mask1" + ".jpg", \
-                    #    bbox_inches="tight", pad_inches=0.0)
                     count += 1
 
-                    with open(f"{args.visual_dir}rev_fail.txt", mode='a') as f:
+                    with open(f"{args.visual_dir}res_inst.txt", mode='a') as f:
                         print(f"{image_name};iou:{this_iou};sentence:{inst}", file=f)
+
+                #output_fname = str(cnt) + "_" + img_fname[0][5:]
+                #draw_bb(IMAGE_DIR + img_fname[0], bbox, "bbox_img/" + output_fname)
+                #cnt+=1
+                #with open(f"bbox_img/inst.txt", mode='a') as f:
+                #    inst = tokenizer.decode(sentences[:, :, j][0])
+                #    print(f"{output_fname}:{inst}", file=f)
+
                 
                 mean_IoU.append(this_iou)
                 cum_I += I
@@ -134,7 +144,7 @@ def evaluate(model, data_loader, bert_model, device):
 
 
 def get_transform(args):
-    transforms = [T.Resize(args.img_size, args.img_size),
+    transforms = [#T.Resize(args.img_size, args.img_size),
                   T.ToTensor(),
                   T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
                   ]

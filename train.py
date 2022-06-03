@@ -14,6 +14,7 @@ import torchvision
 from lib import segmentation
 
 import transforms as T
+#import torchvision.transforms as T
 import utils
 import numpy as np
 
@@ -55,6 +56,7 @@ def IoU(pred, gt):
 
 
 def get_transform(args):
+    #transforms = [T.Resize((args.img_size, args.img_size), interpolation=T.InterpolationMode.BICUBIC),
     transforms = [T.Resize(args.img_size, args.img_size),
                   T.ToTensor(),
                   T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -215,9 +217,9 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
         output = model(image, embedding, l_mask=attentions)
 
         #torch.autograd.set_detect_anomaly(True)
-        #loss = criterion(output, target)
+        loss = criterion(output, target)
         #loss = calc_loss(output, target, dice_loss)
-        loss = calc_loss(output, target, sigmoid_focal_loss)
+        #loss = calc_loss(output, target, sigmoid_focal_loss)
         #loss = criterion(output, target) + calc_loss(output, target, sigmoid_focal_loss)
         optimizer.zero_grad()  # set_to_none=True is only available in pytorch 1.6+
         loss.backward()
