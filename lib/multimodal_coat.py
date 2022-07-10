@@ -782,6 +782,7 @@ class CoaT_SB4(nn.Module):
             )
             for _ in range(serial_depths[3])]
         )
+        self.norm4 = norm_layer(embed_dims[3])
 
         # Initialize weights.
         #trunc_normal_(self.cls_token4, std=.02)
@@ -833,7 +834,11 @@ class CoaT_SB4(nn.Module):
         x4_nocls = self.remove_cls(x4)
         x4_nocls = x4_nocls.reshape(B, H4, W4, -1).permute(0, 3, 1, 2).contiguous()
 
-        return x4_nocls
+        # for bbox
+        x4 = self.norm4(x4)
+        x4_cls = x4[:, 0]
+
+        return x4_nocls, x4_cls
 
     def forward(self, x):
         return self.forward_features(x)
@@ -909,10 +914,24 @@ class CoaT(nn.Module):
             nn.Linear(embed_dims[3], embed_dims[3], bias=False),
             nn.Tanh()
         )
-        self.SB1 = SB1_call(patch_size=patch_size, embed_dims=embed_dims, serial_depths=serial_depths, parallel_depth=parallel_depth, num_heads=num_heads, mlp_ratios=mlp_ratios, **kwargs)
-        self.SB2 = SB2_call(patch_size=patch_size, embed_dims=embed_dims, serial_depths=serial_depths, parallel_depth=parallel_depth, num_heads=num_heads, mlp_ratios=mlp_ratios, **kwargs)
-        self.SB3 = SB3_call(patch_size=patch_size, embed_dims=embed_dims, serial_depths=serial_depths, parallel_depth=parallel_depth, num_heads=num_heads, mlp_ratios=mlp_ratios, **kwargs)
-        self.SB4 = SB4_call(patch_size=patch_size, embed_dims=embed_dims, serial_depths=serial_depths, parallel_depth=parallel_depth, num_heads=num_heads, mlp_ratios=mlp_ratios, **kwargs)
+        self.SB1 = SB1_call(patch_size=patch_size, embed_dims=embed_dims, 
+                            serial_depths=serial_depths, parallel_depth=parallel_depth, 
+                            num_heads=num_heads, mlp_ratios=mlp_ratios, **kwargs)
+        self.SB2 = SB2_call(patch_size=patch_size, embed_dims=embed_dims, 
+                            serial_depths=serial_depths, parallel_depth=parallel_depth, 
+                            num_heads=num_heads, mlp_ratios=mlp_ratios, **kwargs)
+        self.SB3 = SB3_call(patch_size=patch_size, embed_dims=embed_dims, 
+                            serial_depths=serial_depths, parallel_depth=parallel_depth, 
+                            num_heads=num_heads, mlp_ratios=mlp_ratios, **kwargs)
+        self.SB4 = SB4_call(patch_size=patch_size, embed_dims=embed_dims, 
+                            serial_depths=serial_depths, parallel_depth=parallel_depth, 
+                            num_heads=num_heads, mlp_ratios=mlp_ratios, **kwargs)
+
+        #self.head = nn.Linear(embed_dims[3], 4) # CoaT-Lite series: Use feature of last scale for classification.
+        self.head = nn.Sequential(
+                    nn.Linear(embed_dims[3], 128), # CoaT-Lite series: Use feature of last scale for classification.
+                    nn.Linear(128, 4) # CoaT-Lite series: Use feature of last scale for classification.
+                    )
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -971,7 +990,7 @@ class CoaT(nn.Module):
         x3_nocls = x3_nocls + (self.res_gate3(x3_residual) * x3_residual).permute(0, 2, 1).contiguous().reshape(x3_shape)
 
         # Serial blocks 4.
-        x4_nocls = self.SB4(x3_nocls)
+        x4_nocls, x4_cls = self.SB4(x3_nocls)
         x4_shape = x4_nocls.shape
         x4_residual = self.fusion4(x4_nocls, l, l_mask)
         #x4_nocls = x4_nocls + (self.res_gate4(x4_residual) * x4_residual).permute(0, 2, 1).reshape(x4_shape)
@@ -980,7 +999,9 @@ class CoaT(nn.Module):
         x3_residual = x3_residual.permute(0, 2, 1).contiguous().reshape(x3_shape)
         x4_residual = x4_residual.permute(0, 2, 1).contiguous().reshape(x4_shape)
 
-        return [x1_residual, x2_residual, x3_residual, x4_residual]
+        bbox = self.head(x4_cls)
+
+        return [x1_residual, x2_residual, x3_residual, x4_residual], bbox
 
     def forward(self, x, l, l_mask):
         return self.forward_features(x, l, l_mask)

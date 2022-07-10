@@ -62,6 +62,8 @@ def get_parser():
     parser.add_argument('--visualize', action='store_true', help='visualize result or not')
     parser.add_argument('--visual_dir', default='./qualitative_images/', 
                         help='path to store visualize images')
+    parser.add_argument('--use_bbox', action='store_true', help='use REC loss or not')
+    parser.add_argument('--clip', action='store_true', help='use clip features or not')
     # wandb run id
     parser.add_argument('--run_id', type=str, help='wandb run id', required=True)
 

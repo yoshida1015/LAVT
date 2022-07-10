@@ -36,7 +36,10 @@ class ReferDataset(data.Dataset):
         self.split = split
         self.refer = REFER(args.refer_data_root, args.dataset, args.splitBy, args.disc_data)
 
-        self.max_tokens = 100
+        if args.dataset == "reverie":
+            self.max_tokens = 100
+        else:
+            self.max_tokens = 20
 
         ref_ids = self.refer.getRefIds(split=self.split)
         img_ids = self.refer.getImgIds(ref_ids)
@@ -119,6 +122,15 @@ class ReferDataset(data.Dataset):
             attention_mask = self.attention_masks[index][choice_sent]
 
         img_fname = this_img['file_name']
+        height = this_img['height']
+        width = this_img['width']
         bbox = self.refer.getRefBox(this_ref_id)
+        bbox[0] /= width
+        bbox[1] /= height
+        bbox[2] /= width
+        bbox[3] /= height
+        if args.dataset != "reverie":
+            bbox[2] += bbox[0]
+            bbox[3] += bbox[1]
 
-        return img, target, tensor_embeddings, attention_mask, img_fname, bbox
+        return img, target, tensor_embeddings, attention_mask, img_fname, torch.Tensor(bbox)

@@ -6,7 +6,7 @@ from timm.models.layers import trunc_normal_
 from .mmcv_custom import load_checkpoint
 from mmseg.utils import get_root_logger
 
-from .CoaT.src.models.coat import *
+#from .CoaT.src.models.coat import *
 from .multimodal_coat import *
 
 class MultiModalCoaT(nn.Module):
@@ -53,8 +53,8 @@ class MultiModalCoaT(nn.Module):
 
     def forward(self, x, l, l_mask):
         """Forward function."""
-        outs = self.coat(x, l, l_mask)
-        return tuple(outs)
+        outs, bbox = self.coat(x, l, l_mask)
+        return tuple(outs), bbox
 
     def train(self, mode=True):
         """Convert the model into training mode while keep layers freezed."""

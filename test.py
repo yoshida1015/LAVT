@@ -83,7 +83,7 @@ def evaluate(model, data_loader, bert_model, device):
             for j in range(sentences.size(-1)):
                 last_hidden_states = bert_model(sentences[:, :, j], attention_mask=attentions[:, :, j])[0]
                 embedding = last_hidden_states.permute(0, 2, 1)
-                output = model(image, embedding, l_mask=attentions[:, :, j].unsqueeze(-1))
+                output, _ = model(image, embedding, l_mask=attentions[:, :, j].unsqueeze(-1))
                 output = output.cpu()
                 output_mask = output.argmax(1).data.numpy()
 

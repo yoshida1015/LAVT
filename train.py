@@ -28,6 +28,8 @@ import wandb
 #from focal_loss_pytorch.focalloss import FocalLoss
 #from DiceLoss_PyTorch.loss import DiceLoss
 
+import clip
+
 def get_dataset(image_set, transform, args):
     from data.dataset_refer_bert import ReferDataset
     ds = ReferDataset(args,
@@ -54,6 +56,34 @@ def IoU(pred, gt):
 
     return iou, intersection, union
 
+def bb_iou(pred_bb, true_bb):
+    x1_pred, y1_pred, x2_pred, y2_pred = pred_bb
+    x1_true, y1_true, x2_true, y2_true = true_bb
+
+    area_true = (x2_true - x1_true) * (y2_true - y1_true)
+    area_pred = (x2_pred - x1_pred) * (y2_pred - y1_pred)
+    x1_iou = max(x1_pred, x1_true)
+    y1_iou = max(y1_pred, y1_true)
+    x2_iou = min(x2_pred, x2_true)
+    y2_iou = min(y2_pred, y2_true)
+    w_iou = x2_iou - x1_iou
+    h_iou = y2_iou - y1_iou
+
+    if w_iou < 0 or h_iou < 0:
+        return 0.0
+    else:
+        area_iou = w_iou * h_iou
+        iou = area_iou / (area_pred + area_true - area_iou)
+        return iou
+
+def IoU_loss(pred, gt):
+    B, bbox = pred.size()
+    loss = 0.
+    #for i in range(B):
+        #loss += bb_iou(pred[i], gt[i])
+    loss = torchvision.ops.box_iou(pred, gt)
+    #1. - (loss / B)
+    return 1 - loss.mean()
 
 def get_transform(args):
     #transforms = [T.Resize((args.img_size, args.img_size), interpolation=T.InterpolationMode.BICUBIC),
@@ -74,7 +104,10 @@ def calc_loss(input, target, loss_func):
     loss = loss_func(bkg.squeeze(), (target-1)*-1) + loss_func(obj.squeeze(), target)
     return loss
 
-
+def rec_loss(pred, gt):
+    loss = torch.sum(torch.square(pred - gt))
+    loss /= 100
+    return loss
 ##### dice loss ####
 #def dice_loss(pred, target, smooth = 1.):
 #    pred = pred.contiguous()
@@ -136,7 +169,7 @@ def sigmoid_focal_loss(inputs, targets, alpha: float = 0.25, gamma: float = 2):
 
     return loss.mean(1).sum()
 
-def evaluate(model, data_loader, bert_model):
+def evaluate(model, data_loader, bert_model, use_clip):
     model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Test:'
@@ -153,7 +186,7 @@ def evaluate(model, data_loader, bert_model):
     with torch.no_grad():
         for data in metric_logger.log_every(data_loader, 100, header):
             total_its += 1
-            image, target, sentences, attentions, _ = data
+            image, target, sentences, attentions, _, _ = data
             image, target, sentences, attentions = image.cuda(non_blocking=True),\
                                                    target.cuda(non_blocking=True),\
                                                    sentences.cuda(non_blocking=True),\
@@ -162,10 +195,13 @@ def evaluate(model, data_loader, bert_model):
             sentences = sentences.squeeze(1)
             attentions = attentions.squeeze(1)
 
-            last_hidden_states = bert_model(sentences, attention_mask=attentions)[0]
+            if use_clip:
+                last_hidden_states = bert_model(sentences)  # (6, 10, 512)
+            else:
+                last_hidden_states = bert_model(sentences, attention_mask=attentions)[0]  # (6, 10, 768)
             embedding = last_hidden_states.permute(0, 2, 1)  # (B, 768, N_l) to make Conv1d happy
             attentions = attentions.unsqueeze(dim=-1)  # (B, N_l, 1)
-            output = model(image, embedding, l_mask=attentions)
+            output, bbox = model(image, embedding, l_mask=attentions)
             iou, I, U = IoU(output, target)
             acc_ious += iou
             mean_IoU.append(iou)
@@ -192,7 +228,7 @@ def evaluate(model, data_loader, bert_model):
 
 
 def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, print_freq,
-                    iterations, bert_model):
+                    iterations, bert_model, use_clip):
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value}'))
@@ -202,25 +238,43 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
 
     for data in metric_logger.log_every(data_loader, print_freq, header):
         total_its += 1
-        image, target, sentences, attentions, _, _ = data
-        image, target, sentences, attentions = image.cuda(non_blocking=True),\
-                                               target.cuda(non_blocking=True),\
-                                               sentences.cuda(non_blocking=True),\
-                                               attentions.cuda(non_blocking=True)
+        image, target, sentences, attentions, _, bbox_gt = data
+        image, target, sentences, attentions, bbox_gt = image.cuda(non_blocking=True),\
+                                                        target.cuda(non_blocking=True),\
+                                                        sentences.cuda(non_blocking=True),\
+                                                        attentions.cuda(non_blocking=True),\
+                                                        bbox_gt.cuda(non_blocking=True)
 
         sentences = sentences.squeeze(1)
         attentions = attentions.squeeze(1)
 
-        last_hidden_states = bert_model(sentences, attention_mask=attentions)[0]  # (6, 10, 768)
+        if use_clip:
+            last_hidden_states = bert_model(sentences)  # (6, 10, 512)
+        else:
+            last_hidden_states = bert_model(sentences, attention_mask=attentions)[0]  # (6, 10, 768)
         embedding = last_hidden_states.permute(0, 2, 1)  # (B, 768, N_l) to make Conv1d happy
         attentions = attentions.unsqueeze(dim=-1)  # (batch, N_l, 1)
-        output = model(image, embedding, l_mask=attentions)
 
+        if args.use_bbox == True:
+            output, bbox = model(image, embedding, l_mask=attentions)
+            #bb_loss = rec_loss(bbox, bbox_gt)
+            #bb_loss = IoU_loss(bbox, bbox_gt)
+            bb_loss = rec_loss(bbox, bbox_gt) + 0.05 * IoU_loss(bbox, bbox_gt)
+            #print(f"bb_loss rate:{rec_loss(bbox, bbox_gt)/(0.05*IoU_loss(bbox, bbox_gt))}")
+        else:
+            output, _ = model(image, embedding, l_mask=attentions)
+            bb_loss = 0
+            
         #torch.autograd.set_detect_anomaly(True)
-        loss = criterion(output, target)
+        #loss = criterion(output, target)
+        #print(f"bbox_gt:{bbox_gt}")
+        #bb_loss = rec_loss(bbox, bbox_gt)
         #loss = calc_loss(output, target, dice_loss)
         #loss = calc_loss(output, target, sigmoid_focal_loss)
-        #loss = criterion(output, target) + calc_loss(output, target, sigmoid_focal_loss)
+        loss = criterion(output, target) + 0.001 * calc_loss(output, target, sigmoid_focal_loss)
+        #print(f"loss rate:{criterion(output, target) / (0.001 * calc_loss(output, target, sigmoid_focal_loss))}")
+        loss += bb_loss*20
+        #print(f"REC/S rate:{bb_loss*20/loss}")
         optimizer.zero_grad()  # set_to_none=True is only available in pytorch 1.6+
         loss.backward()
         optimizer.step()
@@ -321,12 +375,21 @@ def main(args):
     else:
         resume_epoch = -999
 
+    if args.clip:
+        clip_model, _ = clip.load("RN50", device=device)
+
     for epoch in range(max(0, resume_epoch+1), args.epochs):
         data_loader.sampler.set_epoch(epoch)
-        train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, args.print_freq,
-                        iterations, bert_model)
+        if args.clip:
+            train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, args.print_freq,
+                        iterations, clip_model, args.clip)
+            iou, overallIoU = evaluate(model, data_loader_test, clip_model, args.clip)
+        else:
+            train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, args.print_freq,
+                        iterations, bert_model, args.clip)
+            iou, overallIoU = evaluate(model, data_loader_test, bert_model, args.clip)
 
-        iou, overallIoU = evaluate(model, data_loader_test, bert_model)
+        #iou, overallIoU = evaluate(model, data_loader_test, bert_model)
         wandb.log({'oIoU':overallIoU})
 
         print('Average object IoU {}'.format(iou))
