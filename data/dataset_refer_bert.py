@@ -16,6 +16,8 @@ from refer.refer import REFER
 
 from args import get_parser
 
+import clip
+
 # Dataset configuration initialization
 parser = get_parser()
 args = parser.parse_args()
@@ -36,7 +38,9 @@ class ReferDataset(data.Dataset):
         self.split = split
         self.refer = REFER(args.refer_data_root, args.dataset, args.splitBy, args.disc_data)
 
-        if args.dataset == "reverie":
+        if args.clip:
+            self.max_tokens = 77
+        elif args.dataset == "reverie":
             self.max_tokens = 100
         else:
             self.max_tokens = 20
@@ -51,10 +55,13 @@ class ReferDataset(data.Dataset):
         self.input_ids = []
         self.attention_masks = []
         self.tokenizer = BertTokenizer.from_pretrained(args.bert_tokenizer)
+        #self.tokenizer, _ = clip.load("RN50")
 
         self.eval_mode = eval_mode
         # if we are testing on a dataset, test all sentences of an object;
         # o/w, we are validating during training, randomly sample one sentence for efficiency
+
+
         for r in ref_ids:
             ref = self.refer.Refs[r]
 
@@ -66,9 +73,15 @@ class ReferDataset(data.Dataset):
                 attention_mask = [0] * self.max_tokens
                 padded_input_ids = [0] * self.max_tokens
 
-                input_ids = self.tokenizer.encode(text=sentence_raw, add_special_tokens=True)
+                #print(sentence_raw)
+                #input_ids = self.tokenizer.encode(text=sentence_raw, add_special_tokens=True)
+                #print(input_ids)
 
-                # truncation of tokens
+                input_ids = clip.tokenize(sentence_raw)[0]
+                #print(input_ids)
+                #print(len(input_ids))
+
+                ## truncation of tokens
                 input_ids = input_ids[:self.max_tokens]
 
                 padded_input_ids[:len(input_ids)] = input_ids
