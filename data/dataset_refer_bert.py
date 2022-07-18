@@ -38,9 +38,8 @@ class ReferDataset(data.Dataset):
         self.split = split
         self.refer = REFER(args.refer_data_root, args.dataset, args.splitBy, args.disc_data)
 
-        if args.clip:
-            self.max_tokens = 77
-        elif args.dataset == "reverie":
+        self.clip_tokens = 77
+        if args.dataset == "reverie":
             self.max_tokens = 100
         else:
             self.max_tokens = 20
@@ -53,9 +52,9 @@ class ReferDataset(data.Dataset):
         self.ref_ids = ref_ids
 
         self.input_ids = []
+        self.input_clip_ids = []
         self.attention_masks = []
         self.tokenizer = BertTokenizer.from_pretrained(args.bert_tokenizer)
-        #self.tokenizer, _ = clip.load("RN50")
 
         self.eval_mode = eval_mode
         # if we are testing on a dataset, test all sentences of an object;
@@ -66,31 +65,33 @@ class ReferDataset(data.Dataset):
             ref = self.refer.Refs[r]
 
             sentences_for_ref = []
+            sentences_for_clip_ref = []
             attentions_for_ref = []
 
             for i, (el, sent_id) in enumerate(zip(ref['sentences'], ref['sent_ids'])):
                 sentence_raw = el['raw']
                 attention_mask = [0] * self.max_tokens
                 padded_input_ids = [0] * self.max_tokens
+                padded_input_clip_ids = [0] * self.clip_tokens
 
-                #print(sentence_raw)
-                #input_ids = self.tokenizer.encode(text=sentence_raw, add_special_tokens=True)
-                #print(input_ids)
+                input_ids = self.tokenizer.encode(text=sentence_raw, add_special_tokens=True)
 
-                input_ids = clip.tokenize(sentence_raw)[0]
-                #print(input_ids)
-                #print(len(input_ids))
+                input_clip_ids = clip.tokenize(sentence_raw)[0]
 
                 ## truncation of tokens
                 input_ids = input_ids[:self.max_tokens]
+                input_clip_ids = input_ids[:self.clip_tokens]
 
                 padded_input_ids[:len(input_ids)] = input_ids
+                padded_input_clip_ids[:len(input_clip_ids)] = input_clip_ids
                 attention_mask[:len(input_ids)] = [1]*len(input_ids)
 
                 sentences_for_ref.append(torch.tensor(padded_input_ids).unsqueeze(0))
+                sentences_for_clip_ref.append(torch.tensor(padded_input_clip_ids).unsqueeze(0))
                 attentions_for_ref.append(torch.tensor(attention_mask).unsqueeze(0))
 
             self.input_ids.append(sentences_for_ref)
+            self.input_clip_ids.append(sentences_for_clip_ref)
             self.attention_masks.append(attentions_for_ref)
 
     def get_classes(self):
@@ -120,6 +121,7 @@ class ReferDataset(data.Dataset):
 
         if self.eval_mode:
             embedding = []
+            clip_embedding = []
             att = []
             for s in range(len(self.input_ids[index])):
                 e = self.input_ids[index][s]
@@ -129,10 +131,18 @@ class ReferDataset(data.Dataset):
 
             tensor_embeddings = torch.cat(embedding, dim=-1)
             attention_mask = torch.cat(att, dim=-1)
+
+            for i in range(len(self.input_clip_ids[index])):
+                c = self.input_clip_ids[index][i]
+                clip_embedding.append(c.unsqueeze(-1))
+            clip_txt_embeddings = torch.cat(clip_embedding, dim=-1)
+
         else:
             choice_sent = np.random.choice(len(self.input_ids[index]))
             tensor_embeddings = self.input_ids[index][choice_sent]
             attention_mask = self.attention_masks[index][choice_sent]
+            choice_clip_sent = np.random.choice(len(self.input_clip_ids[index]))
+            clip_txt_embeddings = self.input_clip_ids[index][choice_clip_sent]
 
         img_fname = this_img['file_name']
         height = this_img['height']
@@ -146,4 +156,4 @@ class ReferDataset(data.Dataset):
             bbox[2] += bbox[0]
             bbox[3] += bbox[1]
 
-        return img, target, tensor_embeddings, attention_mask, img_fname, torch.Tensor(bbox)
+        return img, target, tensor_embeddings, clip_txt_embeddings, attention_mask, img_fname, torch.Tensor(bbox)

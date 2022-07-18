@@ -169,7 +169,7 @@ def sigmoid_focal_loss(inputs, targets, alpha: float = 0.25, gamma: float = 2):
 
     return loss.mean(1).sum()
 
-def evaluate(model, data_loader, bert_model, use_clip):
+def evaluate(model, data_loader, bert_model, clip_model, use_clip):
     model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Test:'
@@ -186,24 +186,26 @@ def evaluate(model, data_loader, bert_model, use_clip):
     with torch.no_grad():
         for data in metric_logger.log_every(data_loader, 100, header):
             total_its += 1
-            image, target, sentences, attentions, _, _ = data
-            image, target, sentences, attentions = image.cuda(non_blocking=True),\
-                                                   target.cuda(non_blocking=True),\
-                                                   sentences.cuda(non_blocking=True),\
-                                                   attentions.cuda(non_blocking=True)
+            image, target, sentences, clip_txt_emb, attentions, _, _ = data
+            image, target, sentences, clip_txt_emb, attentions = image.cuda(non_blocking=True),\
+                                                        target.cuda(non_blocking=True),\
+                                                        sentences.cuda(non_blocking=True),\
+                                                        clip_txt_emb.cuda(non_blocking=True),\
+                                                        attentions.cuda(non_blocking=True),\
 
             sentences = sentences.squeeze(1)
+            clip_txt_emb = clip_txt_emb.squeeze(1)
             attentions = attentions.squeeze(1)
 
             if use_clip:
-                last_hidden_states = bert_model.encode_text(sentences)  # (6, 10, 512)
-                embedding_tmp = torch.unsqueeze(last_hidden_states, dim=1).permute(0, 2, 1)  # (B, 768, N_l) to make Conv1d happy
-                embedding = embedding_tmp.float()
-            else:
-                last_hidden_states = bert_model(sentences, attention_mask=attentions)[0]  # (6, 10, 768)
-                embedding = last_hidden_states.permute(0, 2, 1)  # (B, 768, N_l) to make Conv1d happy
-            attentions = attentions.unsqueeze(dim=-1)  # (B, N_l, 1)
-            output, bbox = model(image, embedding, l_mask=attentions)
+                clip_txt_states = clip_model.encode_text(clip_txt_emb)  # (6, 10, 512)
+                clip_emb_tmp = torch.unsqueeze(clip_txt_states, dim=1).permute(0, 2, 1)  # (B, 768, N_l) to make Conv1d happy
+                clip_emb = clip_emb_tmp.float()
+
+            last_hidden_states = bert_model(sentences, attention_mask=attentions)[0]  # (6, 10, 768)
+            embedding = last_hidden_states.permute(0, 2, 1)  # (B, 768, N_l) to make Conv1d happy
+            attentions = attentions.unsqueeze(dim=-1)  # (batch, N_l, 1)
+            output, bbox = model(image, embedding, clip_emb, l_mask=attentions)
             iou, I, U = IoU(output, target)
             acc_ious += iou
             mean_IoU.append(iou)
@@ -230,7 +232,7 @@ def evaluate(model, data_loader, bert_model, use_clip):
 
 
 def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, print_freq,
-                    iterations, bert_model, use_clip):
+                    iterations, bert_model, clip_model, use_clip):
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value}'))
@@ -240,38 +242,35 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
 
     for data in metric_logger.log_every(data_loader, print_freq, header):
         total_its += 1
-        image, target, sentences, attentions, _, bbox_gt = data
-        image, target, sentences, attentions, bbox_gt = image.cuda(non_blocking=True),\
+        image, target, sentences, clip_txt_emb, attentions, _, bbox_gt = data
+        image, target, sentences, clip_txt_emb, attentions, bbox_gt = image.cuda(non_blocking=True),\
                                                         target.cuda(non_blocking=True),\
                                                         sentences.cuda(non_blocking=True),\
+                                                        clip_txt_emb.cuda(non_blocking=True),\
                                                         attentions.cuda(non_blocking=True),\
                                                         bbox_gt.cuda(non_blocking=True)
-        #print(sentences)
         sentences = sentences.squeeze(1)
+        clip_txt_emb = clip_txt_emb.squeeze(1)
         attentions = attentions.squeeze(1)
 
         if use_clip:
-            last_hidden_states = bert_model.encode_text(sentences)  # (6, 10, 512)
-            embedding_tmp = torch.unsqueeze(last_hidden_states, dim=1).permute(0, 2, 1)  # (B, 768, N_l) to make Conv1d happy
-            embedding = embedding_tmp.float()
-            ###embedding_tmp = torch.unsqueeze(last_hidden_states, dim=1).permute(0, 2, 1)  # (B, 768, N_l) to make Conv1d happy
-            ####embedding.to(torch.cuda.FloatTensor)
-            ###embedding = torch.tensor(embedding_tmp, dtype=torch.float)
-            ###embedding.cuda()
-            ####print(embedding.size())
-        else:
-            last_hidden_states = bert_model(sentences, attention_mask=attentions)[0]  # (6, 10, 768)
-            embedding = last_hidden_states.permute(0, 2, 1)  # (B, 768, N_l) to make Conv1d happy
+            clip_txt_states = clip_model.encode_text(clip_txt_emb)  # (6, 10, 512)
+            clip_emb_tmp = torch.unsqueeze(clip_txt_states, dim=1).permute(0, 2, 1)  # (B, 768, N_l) to make Conv1d happy
+            clip_emb = clip_emb_tmp.float()
+
+        last_hidden_states = bert_model(sentences, attention_mask=attentions)[0]  # (6, 10, 768)
+        embedding = last_hidden_states.permute(0, 2, 1)  # (B, 768, N_l) to make Conv1d happy
         attentions = attentions.unsqueeze(dim=-1)  # (batch, N_l, 1)
 
         if args.use_bbox == True:
-            output, bbox = model(image, embedding, l_mask=attentions)
+            #output, bbox = model(image, embedding, clip_emb, l_mask=attentions)
+            output, bbox = model(image, embedding, clip_emb, attentions)
             #bb_loss = rec_loss(bbox, bbox_gt)
             #bb_loss = IoU_loss(bbox, bbox_gt)
             bb_loss = rec_loss(bbox, bbox_gt) + 0.05 * IoU_loss(bbox, bbox_gt)
             #print(f"bb_loss rate:{rec_loss(bbox, bbox_gt)/(0.05*IoU_loss(bbox, bbox_gt))}")
         else:
-            output, _ = model(image, embedding, l_mask=attentions)
+            output, _ = model(image, embedding, clip_emb, l_mask=attentions)
             bb_loss = 0
             
         #torch.autograd.set_detect_anomaly(True)
@@ -387,19 +386,15 @@ def main(args):
     if args.clip:
         clip_model, _ = clip.load("RN50")
         clip_model.cuda()
+    else:
+        clip_model = None
 
     for epoch in range(max(0, resume_epoch+1), args.epochs):
         data_loader.sampler.set_epoch(epoch)
-        if args.clip:
-            train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, args.print_freq,
-                        iterations, clip_model, args.clip)
-            iou, overallIoU = evaluate(model, data_loader_test, clip_model, args.clip)
-        else:
-            train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, args.print_freq,
-                        iterations, bert_model, args.clip)
-            iou, overallIoU = evaluate(model, data_loader_test, bert_model, args.clip)
+        train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, args.print_freq,\
+                        iterations, bert_model, clip_model, args.clip)
+        iou, overallIoU = evaluate(model, data_loader_test, bert_model, clip_model, args.clip)
 
-        #iou, overallIoU = evaluate(model, data_loader_test, bert_model)
         wandb.log({'oIoU':overallIoU})
 
         print('Average object IoU {}'.format(iou))

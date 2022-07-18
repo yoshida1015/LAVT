@@ -57,7 +57,7 @@ class Mlp(nn.Module):
         return x
 
 class PWAM(nn.Module):
-    def __init__(self, dim, v_in_channels, l_in_channels, key_channels, value_channels, num_heads=0, dropout=0.0):
+    def __init__(self, dim, v_in_channels, l_in_channels, clip_txt_channels, key_channels, value_channels, num_heads=0, dropout=0.0):
         super(PWAM, self).__init__()
         # input x shape: (B, H*W, dim)
         self.vis_project = nn.Sequential(nn.Conv1d(dim, dim, 1, 1),  # the init function sets bias to 0 if bias is True
@@ -71,14 +71,15 @@ class PWAM(nn.Module):
                                                             value_channels,  # value
                                                             out_channels=value_channels,  # out
                                                             num_heads=num_heads)
-        print(l_in_channels)
 
         self.project_mm = nn.Sequential(nn.Conv1d(value_channels, value_channels, 1, 1),
                                         nn.GELU(),
                                         nn.Dropout(dropout)
                                         )
 
-    def forward(self, x, l, l_mask):
+        self.clip_to_bert_channels = nn.Linear(clip_txt_channels, l_in_channels)
+
+    def forward(self, x, l, clip_txt, l_mask):
         # input x shape: (B, dim, H, W)
         x_shape = x.shape
         x = torch.flatten(x, 2, 3)  # (B, dim, H*W)
@@ -87,7 +88,17 @@ class PWAM(nn.Module):
         # input x shape: (B, H*W, dim)
         vis = self.vis_project(x.permute(0, 2, 1).contiguous())  # (B, dim, H*W)
 
-        lang = self.image_lang_att(x, l, l_mask)  # (B, H*W, dim)
+        clip_txt = clip_txt.permute(0, 2, 1).contiguous()
+        clip_txt_feat = self.clip_to_bert_channels(clip_txt)
+        clip_txt_feat = clip_txt_feat.permute(0, 2, 1).contiguous()
+        l_concat = torch.cat((l, clip_txt_feat), dim=2)
+
+        
+        b, l, m = l_mask.shape
+        for_clip_mask = torch.ones(b, 1, m).cuda()
+        l_mask_cat = torch.cat((l_mask, for_clip_mask), 1)
+
+        lang = self.image_lang_att(x, l_concat, l_mask_cat)  # (B, H*W, dim)
 
         lang = lang.permute(0, 2, 1).contiguous()  # (B, dim, H*W)
 
@@ -143,27 +154,27 @@ class SpatialImageLanguageAttention(nn.Module):
         # l_mask shape: (B, N_l, 1)
         B, HW = x.size(0), x.size(1)
         x = x.permute(0, 2, 1).contiguous()  # (B, key_channels, H*W)
-        #l_mask = l_mask.permute(0, 2, 1).contiguous()  # (B, N_l, 1) -> (B, 1, N_l)
+        l_mask = l_mask.permute(0, 2, 1).contiguous()  # (B, N_l, 1) -> (B, 1, N_l)
 
         query = self.f_query(x)  # (B, key_channels, H*W) if Conv1D
         query = query.permute(0, 2, 1).contiguous()  # (B, H*W, key_channels)
         key = self.f_key(l)  # (B, key_channels, N_l)
         value = self.f_value(l)  # (B, self.value_channels, N_l)
-        #key = key * l_mask  # (B, key_channels, N_l)
-        #value = value * l_mask  # (B, self.value_channels, N_l)
+        key = key * l_mask  # (B, key_channels, N_l)
+        value = value * l_mask  # (B, self.value_channels, N_l)
         n_l = value.size(-1)
         query = query.reshape(B, HW, self.num_heads, self.key_channels//self.num_heads).permute(0, 2, 1, 3).contiguous()
         # (b, num_heads, H*W, self.key_channels//self.num_heads)
         key = key.reshape(B, self.num_heads, self.key_channels//self.num_heads, n_l)
         # (b, num_heads, self.key_channels//self.num_heads, n_l)
         value = value.reshape(B, self.num_heads, self.value_channels//self.num_heads, n_l)
-        # # (b, num_heads, self.value_channels//self.num_heads, n_l)
-        #l_mask = l_mask.unsqueeze(1)  # (b, 1, 1, n_l)
+        # (b, num_heads, self.value_channels//self.num_heads, n_l)
+        l_mask = l_mask.unsqueeze(1)  # (b, 1, 1, n_l)
 
         sim_map = torch.matmul(query, key)  # (B, self.num_heads, H*W, N_l)
         sim_map = (self.key_channels ** -.5) * sim_map  # scaled dot product
 
-        #sim_map = sim_map + (1e4*l_mask - 1e4)  # assign a very small number to padding positions
+        sim_map = sim_map + (1e4*l_mask - 1e4)  # assign a very small number to padding positions
         sim_map = F.softmax(sim_map, dim=-1)  # (B, num_heads, h*w, N_l)
         out = torch.matmul(sim_map, value.permute(0, 1, 3, 2).contiguous())  # (B, num_heads, H*W, self.value_channels//num_heads)
         out = out.permute(0, 2, 1, 3).contiguous().reshape(B, HW, self.value_channels)  # (B, H*W, value_channels)
@@ -858,12 +869,14 @@ class CoaT(nn.Module):
 
         super().__init__()
 
-        lang_dim = 1024
+        lang_dim = 768
+        clip_txt_dim = 1024
 
         # fuse before downsampling
         self.fusion1 = PWAM(embed_dims[0],# both the visual input and for combining, num of channels
                             embed_dims[0],  # v_in
                             lang_dim,       # l_in
+                            clip_txt_dim,   # clip_txt_in
                             embed_dims[0],  # key
                             embed_dims[0],  # value
                             num_heads=1,
@@ -878,6 +891,7 @@ class CoaT(nn.Module):
         self.fusion2 = PWAM(embed_dims[1],# both the visual input and for combining, num of channels
                             embed_dims[1],  # v_in
                             lang_dim,       # l_in
+                            clip_txt_dim,   # clip_txt_in
                             embed_dims[1],  # key
                             embed_dims[1],  # value
                             num_heads=1,
@@ -892,6 +906,7 @@ class CoaT(nn.Module):
         self.fusion3 = PWAM(embed_dims[2],# both the visual input and for combining, num of channels
                             embed_dims[2],  # v_in
                             lang_dim,       # l_in
+                            clip_txt_dim,   # clip_txt_in
                             embed_dims[2],  # key
                             embed_dims[2],  # value
                             num_heads=1,
@@ -906,6 +921,7 @@ class CoaT(nn.Module):
         self.fusion4 = PWAM(embed_dims[3],# both the visual input and for combining, num of channels
                             embed_dims[3],  # v_in
                             lang_dim,       # l_in
+                            clip_txt_dim,   # clip_txt_in
                             embed_dims[3],  # key
                             embed_dims[3],  # value
                             num_heads=1,
@@ -972,30 +988,30 @@ class CoaT(nn.Module):
         """ Remove CLS token. """
         return x[:, 1:, :]
 
-    def forward_features(self, x0, l, l_mask):
+    def forward_features(self, x0, l, clip_txt, l_mask):
 
         # Serial blocks 1.
         x1_nocls = self.SB1(x0)
         x1_shape = x1_nocls.shape
-        x1_residual = self.fusion1(x1_nocls, l, l_mask)
+        x1_residual = self.fusion1(x1_nocls, l, clip_txt, l_mask)
         x1_nocls = x1_nocls + (self.res_gate1(x1_residual) * x1_residual).permute(0, 2, 1).contiguous().reshape(x1_shape)
         
         # Serial blocks 2.
         x2_nocls = self.SB2(x1_nocls)
         x2_shape = x2_nocls.shape
-        x2_residual = self.fusion2(x2_nocls, l, l_mask)
+        x2_residual = self.fusion2(x2_nocls, l, clip_txt, l_mask)
         x2_nocls = x2_nocls + (self.res_gate2(x2_residual) * x2_residual).permute(0, 2, 1).contiguous().reshape(x2_shape)
 
         # Serial blocks 3.
         x3_nocls = self.SB3(x2_nocls)
         x3_shape = x3_nocls.shape
-        x3_residual = self.fusion3(x3_nocls, l, l_mask)
+        x3_residual = self.fusion3(x3_nocls, l, clip_txt, l_mask)
         x3_nocls = x3_nocls + (self.res_gate3(x3_residual) * x3_residual).permute(0, 2, 1).contiguous().reshape(x3_shape)
 
         # Serial blocks 4.
         x4_nocls, x4_cls = self.SB4(x3_nocls)
         x4_shape = x4_nocls.shape
-        x4_residual = self.fusion4(x4_nocls, l, l_mask)
+        x4_residual = self.fusion4(x4_nocls, l, clip_txt, l_mask)
         #x4_nocls = x4_nocls + (self.res_gate4(x4_residual) * x4_residual).permute(0, 2, 1).reshape(x4_shape)
         x1_residual = x1_residual.permute(0, 2, 1).contiguous().reshape(x1_shape)
         x2_residual = x2_residual.permute(0, 2, 1).contiguous().reshape(x2_shape)
@@ -1006,8 +1022,8 @@ class CoaT(nn.Module):
 
         return [x1_residual, x2_residual, x3_residual, x4_residual], bbox
 
-    def forward(self, x, l, l_mask):
-        return self.forward_features(x, l, l_mask)
+    def forward(self, x, l, clip_txt, l_mask):
+        return self.forward_features(x, l, clip_txt, l_mask)
 
 
 # CoaT.
