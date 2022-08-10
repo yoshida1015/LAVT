@@ -235,7 +235,52 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
 
 
 
+
+import torch.multiprocessing as mp
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel
+
+# DDPのセットアップ用関数
+def setup(rank, world_size, port_num):
+    current_dir = os.getcwd()
+    with open(current_dir + "/hostfile") as f:
+        host = f.readlines()
+    host[0] = host[0].rstrip("\n")
+    dist_url = "tcp://" + host[0] + ":" + str(port_num)
+    print(dist_url)
+    # initialize the process group
+    dist.init_process_group(
+        "nccl", init_method=dist_url, rank=rank, world_size=world_size
+    )
+    print("tcp connected")
+
+
 def main(args):
+#####
+
+    node_rank = int(os.environ["OMPI_COMM_WORLD_RANK"])  # Process number in MPI
+    size = int(os.environ["OMPI_COMM_WORLD_SIZE"])  # The all size of process
+    print("node rank:{}".format(node_rank))
+    print("size of process:{}".format(size))
+    gpu = torch.cuda.device_count()  # gpu num per node
+    world_size = gpu * size  # total gpu num
+    print(world_size)
+
+    port_num = 50000
+
+    # Setup Distributed Training
+    # gpu_rank: 0~4 in ABCI, i.e. intra gpu rank
+    # world size: total process num
+    print(node_rank)
+    rank = gpu * node_rank + gpu_rank  # global gpu rank
+    if rank == 0:
+        print("num_gpu:{}".format(gpu))
+    print("global rank:{}".format(rank))
+    print("intra rank:{}".format(gpu_rank))
+    # set up communication setting between nodes
+    setup(rank, world_size, port_num)
+
+#####
     wandb.init(name=args.run_id, project='lavt')
 
     dataset, num_classes = get_dataset("train",
@@ -248,6 +293,8 @@ def main(args):
     print(f"local rank {args.local_rank} / global rank {utils.get_rank()} successfully built train dataset.")
     num_tasks = utils.get_world_size()
     global_rank = utils.get_rank()
+    print(f"num_tasks:{num_tasks}")
+    print(f"global_rank{global_rank}")
     train_sampler = torch.utils.data.distributed.DistributedSampler(dataset, num_replicas=num_tasks, rank=global_rank,
                                                                     shuffle=True)
     test_sampler = torch.utils.data.SequentialSampler(dataset_test)
