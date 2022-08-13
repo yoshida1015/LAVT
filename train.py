@@ -216,7 +216,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
 
         loss = criterion(output, target)
         #loss = calc_loss(output, target, dice_loss)
-        #loss = calc_loss(output, target, sigmoid_focal_loss)
+        loss += 0.001 * calc_loss(output, target, sigmoid_focal_loss)
         optimizer.zero_grad()  # set_to_none=True is only available in pytorch 1.6+
         loss.backward()
         optimizer.step()
@@ -241,7 +241,7 @@ def main(args):
     dataset, num_classes = get_dataset("train",
                                        get_transform(args=args),
                                        args=args)
-    dataset_test, _ = get_dataset("val",
+    dataset_test, _ = get_dataset("test",
                                   get_transform(args=args),
                                   args=args)
 
