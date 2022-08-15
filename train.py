@@ -272,6 +272,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
         #loss = calc_loss(output, target, dice_loss)
         #loss = calc_loss(output, target, sigmoid_focal_loss)
         loss = criterion(output, target) + 0.001 * calc_loss(output, target, sigmoid_focal_loss)
+        #loss = criterion(output, target)
         #print(f"loss rate:{criterion(output, target) / (0.001 * calc_loss(output, target, sigmoid_focal_loss))}")
         loss += bb_loss*20
         #print(f"REC/S rate:{bb_loss*20/loss}")
@@ -299,7 +300,7 @@ def main(args):
     dataset, num_classes = get_dataset("train",
                                        get_transform(args=args),
                                        args=args)
-    dataset_test, _ = get_dataset("val",
+    dataset_test, _ = get_dataset("test",
                                   get_transform(args=args),
                                   args=args)
 
