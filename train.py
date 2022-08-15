@@ -499,21 +499,21 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
             #print(f"output_scores: {output_scores.size()}")
             #print(f"bitmasks: {per_im_gt['bitmasks'].size()}")
             #print(f"output: {output.size()}")
-            b_loss_prj_term = compute_project_term(bkg_scores, per_im_gt["bitmasks"])
+            ###b_loss_prj_term = compute_project_term(bkg_scores, per_im_gt["bitmasks"])
             o_loss_prj_term = compute_project_term(obj_scores, per_im_gt["bitmasks"])
 
-            b_pairwise_losses = compute_pairwise_term(
-                bkg, args.pairwise_size,
-                args.pairwise_dilation
-            )
+            #b_pairwise_losses = compute_pairwise_term(
+            #    bkg, args.pairwise_size,
+            #    args.pairwise_dilation
+            #)
 
-            weights = (per_im_gt["color_similarity"] >= args.pairwise_color_thresh).float() * per_im_gt["bitmasks"].float()
-            b_loss_pairwise = (b_pairwise_losses * weights).sum() / weights.sum().clamp(min=1.0)
-            if args.warmup:
-                warmup_factor = min(float(total_its) / float(args.warmup_iters), 1.0)
-            else:
-                warmup_factor =  1.0
-            b_loss_pairwise = b_loss_pairwise * warmup_factor
+            #weights = (per_im_gt["color_similarity"] >= args.pairwise_color_thresh).float() * per_im_gt["bitmasks"].float()
+            #b_loss_pairwise = (b_pairwise_losses * weights).sum() / weights.sum().clamp(min=1.0)
+            #if args.warmup:
+            #    warmup_factor = min(float(total_its) / float(args.warmup_iters), 1.0)
+            #else:
+            #    warmup_factor =  1.0
+            #b_loss_pairwise = b_loss_pairwise * warmup_factor
 
             o_pairwise_losses = compute_pairwise_term(
                 obj, args.pairwise_size,
@@ -527,7 +527,8 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
             else:
                 warmup_factor =  1.0
             o_loss_pairwise = o_loss_pairwise * warmup_factor
-            box_sp_loss = b_loss_prj_term + b_loss_pairwise + o_loss_prj_term + o_loss_pairwise 
+            #box_sp_loss = b_loss_prj_term + b_loss_pairwise + o_loss_prj_term + o_loss_pairwise 
+            box_sp_loss = o_loss_prj_term + o_loss_pairwise 
         else:
             box_sp_loss = 0
             
