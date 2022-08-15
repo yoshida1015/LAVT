@@ -28,7 +28,198 @@ import wandb
 #from focal_loss_pytorch.focalloss import FocalLoss
 #from DiceLoss_PyTorch.loss import DiceLoss
 
-import clip
+#import clip
+from skimage import color
+import sys
+
+
+def dice_coefficient(x, target):
+    eps = 1e-5
+    n_inst = x.size(0)
+    x = x.reshape(n_inst, -1)
+    target = target.reshape(n_inst, -1)
+    intersection = (x * target).sum(dim=1)
+    union = (x ** 2.0).sum(dim=1) + (target ** 2.0).sum(dim=1) + eps
+    loss = 1. - (2 * intersection / union)
+    return loss
+
+
+
+def unfold_wo_center(x, kernel_size, dilation):
+    assert x.dim() == 4
+    assert kernel_size % 2 == 1
+
+    # using SAME padding
+    padding = (kernel_size + (dilation - 1) * (kernel_size - 1)) // 2
+    unfolded_x = F.unfold(
+        x, kernel_size=kernel_size,
+        padding=padding,
+        dilation=dilation
+    )
+
+    unfolded_x = unfolded_x.reshape(
+        x.size(0), x.size(1), -1, x.size(2), x.size(3)
+    )
+
+    # remove the center pixels
+    size = kernel_size ** 2
+    unfolded_x = torch.cat((
+        unfolded_x[:, :, :size // 2],
+        unfolded_x[:, :, size // 2 + 1:]
+    ), dim=2)
+
+    return unfolded_x
+
+
+def compute_project_term(mask_scores, gt_bitmasks):
+    mask_losses_y = dice_coefficient(
+        mask_scores.max(dim=2, keepdim=True)[0],
+        gt_bitmasks.max(dim=2, keepdim=True)[0]
+    )
+    mask_losses_x = dice_coefficient(
+        mask_scores.max(dim=3, keepdim=True)[0],
+        gt_bitmasks.max(dim=3, keepdim=True)[0]
+    )
+    return (mask_losses_x + mask_losses_y).mean()
+
+
+def compute_pairwise_term(mask_logits, pairwise_size, pairwise_dilation):
+    assert mask_logits.dim() == 4
+
+    log_fg_prob = F.logsigmoid(mask_logits)
+    log_bg_prob = F.logsigmoid(-mask_logits)
+
+    log_fg_prob_unfold = unfold_wo_center(
+        log_fg_prob, kernel_size=pairwise_size,
+        dilation=pairwise_dilation
+    )
+    log_bg_prob_unfold = unfold_wo_center(
+        log_bg_prob, kernel_size=pairwise_size,
+        dilation=pairwise_dilation
+    )
+
+    # the probability of making the same prediction = p_i * p_j + (1 - p_i) * (1 - p_j)
+    # we compute the the probability in log space to avoid numerical instability
+    log_same_fg_prob = log_fg_prob[:, :, None] + log_fg_prob_unfold
+    log_same_bg_prob = log_bg_prob[:, :, None] + log_bg_prob_unfold
+
+    max_ = torch.max(log_same_fg_prob, log_same_bg_prob)
+    log_same_prob = torch.log(
+        torch.exp(log_same_fg_prob - max_) +
+        torch.exp(log_same_bg_prob - max_)
+    ) + max_
+
+    # loss = -log(prob)
+    return -log_same_prob[:, 0]
+
+def get_images_color_similarity(images, image_masks, kernel_size, dilation):
+    assert images.dim() == 4
+    assert images.size(0) == 1
+
+    unfolded_images = unfold_wo_center(
+        images, kernel_size=kernel_size, dilation=dilation
+    )
+
+    diff = images[:, :, None] - unfolded_images
+    similarity = torch.exp(-torch.norm(diff, dim=1) * 0.5).cuda()
+
+    unfolded_weights = unfold_wo_center(
+        image_masks[None, None], kernel_size=kernel_size,
+        dilation=dilation
+    )
+    unfolded_weights = torch.max(unfolded_weights, dim=1)[0].cuda()
+
+    return similarity * unfolded_weights
+
+def add_bitmasks_from_boxes(args, images, image_masks, im_h, im_w, bboxes):
+    #stride = args.mask_out_stride
+    #print(f"stride: {stride}")
+    #start = int(stride // 2)
+
+    #assert images.size(2) % stride == 0
+    #assert images.size(3) % stride == 0
+
+    #downsampled_images = F.avg_pool2d(
+    #    images.float(), kernel_size=stride,
+    #    stride=stride, padding=0
+    #)[:, [2, 1, 0]]
+    #print(f"downsampled_images: {downsampled_images.size()}")
+    #image_masks = image_masks[:, start::stride, start::stride]
+    #print(f"image_masks: {image_masks.size()}")
+
+    #for im_i, per_im_gt_inst in enumerate(instances):
+    for im_i in range(args.batch_size):
+        images_lab = color.rgb2lab(images[im_i].byte().permute(1, 2, 0).cpu().numpy())
+        images_lab = torch.as_tensor(images_lab, device=images.device, dtype=torch.float32)
+        images_lab = images_lab.permute(2, 0, 1)[None]
+        #print(f"images_lab: {images_lab.size()}")
+        #print(f"image_masks: {image_masks.size()}")
+        images_color_similarity = get_images_color_similarity(
+            images_lab, image_masks[im_i],
+            args.pairwise_size, args.pairwise_dilation
+        )
+        #print(f"images_color_similarity: {images_color_similarity.size()}")
+
+        #per_im_boxes = per_im_gt_inst.gt_boxes.tensor
+        #per_im_boxes = bboxes[im_i].tensor
+        #print(f"bboxes: {bboxes[im_i]}")
+        per_box = bboxes[im_i]
+        #print(f"per_im_boxes: {per_im_boxes.size()}")
+        #per_im_bitmasks = []
+        #per_im_bitmasks_full = []
+        # only one bbox pre image in RES
+        #for per_box in per_im_boxes:
+        bitmask_full = torch.zeros((im_h, im_w)).float().cuda()
+        #bitmask_full[int(per_box[1]):int(per_box[3] + 1), int(per_box[0]):int(per_box[2] + 1)] = 1.0
+        bitmask_full[int(im_h * per_box[1]):int(im_h * per_box[3] + 1), int(im_w * per_box[0]):int(im_w * per_box[2] + 1)] = 1.0
+        #print(f"bitmask_full: {bitmask_full.size()}")
+        #bitmask = bitmask_full[start::stride, start::stride]
+        # already downsampled in dataloader
+        bitmask = bitmask_full
+        #print(f"bitmask: {bitmask.size()}")
+
+        #assert bitmask.size(0) * stride == im_h
+        #assert bitmask.size(1) * stride == im_w
+
+        #per_im_bitmasks.append(bitmask)
+        #per_im_bitmasks_full.append(bitmask_full)
+        per_im_bitmasks = torch.unsqueeze(bitmask, 0)
+        per_im_bitmasks_full = torch.unsqueeze(bitmask_full, 0)
+
+        #color_similarity = torch.stack(images_color_similarity, dim=0)
+        #color_similarity = torch.cat(images_color_similarity, dim=0)
+        if im_i == 0:
+            gt_bitmasks = per_im_bitmasks
+            gt_bitmasks_full = per_im_bitmasks_full
+            color_similarity = images_color_similarity
+        else:
+            gt_bitmasks = torch.cat([gt_bitmasks, per_im_bitmasks], dim=0)
+            gt_bitmasks_full = torch.cat([gt_bitmasks_full, per_im_bitmasks_full], dim=0)
+            color_similarity = torch.cat([color_similarity, images_color_similarity], dim=0)
+        #image_color_similarity = torch.cat([
+        #    images_color_similarity for _ in range(len(per_im_gt_inst))
+        #], dim=0)
+        #print(f"gt_bitmasks: {gt_bitmasks.size()}")
+        #print(f"gt_bitmasks_full: {gt_bitmasks_full.size()}")
+        #print(f"color_similarity: {color_similarity.size()}")
+    #print(f"gt_bitmasks: {gt_bitmasks.size()}")
+    #print(f"gt_bitmasks_full: {gt_bitmasks_full.size()}")
+    #print(f"color_similarity: {color_similarity.size()}")
+    per_im_gt = dict()
+    per_im_gt["bitmasks"] = torch.unsqueeze(gt_bitmasks, 1)
+    per_im_gt["bitmasks_full"] = torch.unsqueeze(gt_bitmasks_full, 1)
+    per_im_gt["color_similarity"] = color_similarity
+    return per_im_gt
+
+
+        #per_im_gt_inst.gt_bitmasks = torch.stack(per_im_bitmasks, dim=0)
+        #per_im_gt_inst.gt_bitmasks_full = torch.stack(per_im_bitmasks_full, dim=0)
+        #per_im_gt_inst.image_color_similarity = torch.cat([
+        #    images_color_similarity for _ in range(len(per_im_gt_inst))
+        #], dim=0)
+        #print(f"per_im_gt_inst.gt_bitmasks: {per_im_gt_inst.gt_bitmasks.size()}")
+        #print(f"per_im_gt_inst.gt_bitmasks_full: {per_im_gt_inst.gt_bitmasks_full.size()}")
+        #print(f"per_im_gt_inst.image_color_similarity: {per_im_gt_inst.image_color_similarity.size()}")
 
 def get_dataset(image_set, transform, args):
     from data.dataset_refer_bert import ReferDataset
@@ -41,6 +232,20 @@ def get_dataset(image_set, transform, args):
 
     return ds, num_classes
 
+# IoU calculation for validation
+def binary_IoU(pred, gt, thr):
+    #pred = pred.argmax(1)
+    pred = (pred > thr).float()
+
+    intersection = torch.sum(torch.mul(pred, gt))
+    union = torch.sum(torch.add(pred, gt)) - intersection
+
+    if intersection == 0 or union == 0:
+        iou = 0
+    else:
+        iou = float(intersection) / float(union)
+
+    return iou, intersection, union
 
 # IoU calculation for validation
 def IoU(pred, gt):
@@ -169,7 +374,7 @@ def sigmoid_focal_loss(inputs, targets, alpha: float = 0.25, gamma: float = 2):
 
     return loss.mean(1).sum()
 
-def evaluate(model, data_loader, bert_model, use_clip):
+def evaluate(model, data_loader, bert_model, use_clip, mask_thr):
     model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Test:'
@@ -203,6 +408,7 @@ def evaluate(model, data_loader, bert_model, use_clip):
             attentions = attentions.unsqueeze(dim=-1)  # (B, N_l, 1)
             output, bbox = model(image, embedding, l_mask=attentions)
             iou, I, U = IoU(output, target)
+            #iou, I, U = binary_IoU(output, target, mask_thr)
             acc_ious += iou
             mean_IoU.append(iou)
             cum_I += I
@@ -264,6 +470,66 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
         else:
             output, _ = model(image, embedding, l_mask=attentions)
             bb_loss = 0
+
+        if args.boxinst == True:
+            #print("OK")
+            #original_image_mask = [torch.ones_like(x[0], dtype=torch.float32) for x in image]
+            ####for i in range(len(original_image_masks)):
+            ####    im_h = batched_inputs[i]["height"]
+            ####    pixels_removed = int(
+            ####        self.bottom_pixels_removed *
+            ####        float(original_images[i].size(1)) / float(im_h)
+            ####    )
+            ####    if pixels_removed > 0:
+            ####        original_image_masks[i][-pixels_removed:, :] = 0
+            #original_mask_tensor = torch.tensor(original_image_mask)
+
+            original_mask_tensor = torch.ones([image.size(0), image.size(2), image.size(3)], dtype=torch.float32)
+
+            per_im_gt = add_bitmasks_from_boxes(
+                args, image, original_mask_tensor,
+                image.size(-2), image.size(-1), bbox_gt
+            )
+
+            bkg, obj = torch.split(output, 1, dim=1)
+            bkg_scores = (1.0 - bkg).sigmoid()
+            obj_scores = obj.sigmoid()
+
+            #output_scores = output.sigmoid()
+            #print(f"output_scores: {output_scores.size()}")
+            #print(f"bitmasks: {per_im_gt['bitmasks'].size()}")
+            #print(f"output: {output.size()}")
+            b_loss_prj_term = compute_project_term(bkg_scores, per_im_gt["bitmasks"])
+            o_loss_prj_term = compute_project_term(obj_scores, per_im_gt["bitmasks"])
+
+            b_pairwise_losses = compute_pairwise_term(
+                bkg, args.pairwise_size,
+                args.pairwise_dilation
+            )
+
+            weights = (per_im_gt["color_similarity"] >= args.pairwise_color_thresh).float() * per_im_gt["bitmasks"].float()
+            b_loss_pairwise = (b_pairwise_losses * weights).sum() / weights.sum().clamp(min=1.0)
+            if args.warmup:
+                warmup_factor = min(float(total_its) / float(args.warmup_iters), 1.0)
+            else:
+                warmup_factor =  1.0
+            b_loss_pairwise = b_loss_pairwise * warmup_factor
+
+            o_pairwise_losses = compute_pairwise_term(
+                obj, args.pairwise_size,
+                args.pairwise_dilation
+            )
+
+            weights = (per_im_gt["color_similarity"] >= args.pairwise_color_thresh).float() * per_im_gt["bitmasks"].float()
+            o_loss_pairwise = (o_pairwise_losses * weights).sum() / weights.sum().clamp(min=1.0)
+            if args.warmup:
+                warmup_factor = min(float(total_its) / float(args.warmup_iters), 1.0)
+            else:
+                warmup_factor =  1.0
+            o_loss_pairwise = o_loss_pairwise * warmup_factor
+            box_sp_loss = b_loss_prj_term + b_loss_pairwise + o_loss_prj_term + o_loss_pairwise 
+        else:
+            box_sp_loss = 0
             
         #torch.autograd.set_detect_anomaly(True)
         #loss = criterion(output, target)
@@ -272,8 +538,20 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
         #loss = calc_loss(output, target, dice_loss)
         #loss = calc_loss(output, target, sigmoid_focal_loss)
         loss = criterion(output, target) + 0.001 * calc_loss(output, target, sigmoid_focal_loss)
+        ###output_ = torch.squeeze(output, 1).sigmoid()
+        #loss_1 = nn.functional.cross_entropy(output_, target) 
+        ###loss_1 = F.binary_cross_entropy(output_, target.float()) 
+        ###loss_2 = torchvision.ops.sigmoid_focal_loss(output_, target.float(), reduction="mean")
+        ###loss = loss_1 + loss_2
+        #print(f"loss_1: {loss_1}")
+        #print(f"loss_2: {loss_2}")
+        #print(f"loss rate:{loss_2 / loss_1}")
         #print(f"loss rate:{criterion(output, target) / (0.001 * calc_loss(output, target, sigmoid_focal_loss))}")
-        loss += bb_loss*20
+        #print(f"bbloss rate:{loss / (bb_loss*20)}")
+        #print(f"boxinstloss rate:{loss / box_sp_loss}")
+        #loss += bb_loss*20
+        #loss = bb_loss*20
+        loss += box_sp_loss
         #print(f"REC/S rate:{bb_loss*20/loss}")
         optimizer.zero_grad()  # set_to_none=True is only available in pytorch 1.6+
         loss.backward()
@@ -299,7 +577,7 @@ def main(args):
     dataset, num_classes = get_dataset("train",
                                        get_transform(args=args),
                                        args=args)
-    dataset_test, _ = get_dataset("val",
+    dataset_test, _ = get_dataset("test",
                                   get_transform(args=args),
                                   args=args)
 
@@ -383,11 +661,11 @@ def main(args):
         if args.clip:
             train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, args.print_freq,
                         iterations, clip_model, args.clip)
-            iou, overallIoU = evaluate(model, data_loader_test, clip_model, args.clip)
+            iou, overallIoU = evaluate(model, data_loader_test, clip_model, args.clip, args.mask_thr)
         else:
             train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, args.print_freq,
                         iterations, bert_model, args.clip)
-            iou, overallIoU = evaluate(model, data_loader_test, bert_model, args.clip)
+            iou, overallIoU = evaluate(model, data_loader_test, bert_model, args.clip, args.mask_thr)
 
         #iou, overallIoU = evaluate(model, data_loader_test, bert_model)
         wandb.log({'oIoU':overallIoU})

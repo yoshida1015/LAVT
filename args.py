@@ -67,6 +67,16 @@ def get_parser():
     # wandb run id
     parser.add_argument('--run_id', type=str, help='wandb run id', required=True)
 
+    # box-supervised
+    parser.add_argument('--boxinst', action='store_true')
+    parser.add_argument('--pairwise_size', default=3, type=int)
+    parser.add_argument('--pairwise_dilation', default=2, type=int)
+    parser.add_argument('--pairwise_color_thresh', default=0.3, type=float)
+    parser.add_argument('--warmup', action='store_true')
+    parser.add_argument('--warmup_iters', default=32, type=int)
+    parser.add_argument('--mask_thr', default=0.35, type=float)
+
+
     return parser
 
 

@@ -928,10 +928,10 @@ class CoaT(nn.Module):
                             num_heads=num_heads, mlp_ratios=mlp_ratios, **kwargs)
 
         #self.head = nn.Linear(embed_dims[3], 4) # CoaT-Lite series: Use feature of last scale for classification.
-        self.head = nn.Sequential(
-                    nn.Linear(embed_dims[3], 128), # CoaT-Lite series: Use feature of last scale for classification.
-                    nn.Linear(128, 4) # CoaT-Lite series: Use feature of last scale for classification.
-                    )
+        #self.head = nn.Sequential(
+        #            nn.Linear(embed_dims[3], 128), # CoaT-Lite series: Use feature of last scale for classification.
+        #            nn.Linear(128, 4) # CoaT-Lite series: Use feature of last scale for classification.
+        #            )
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -999,7 +999,8 @@ class CoaT(nn.Module):
         x3_residual = x3_residual.permute(0, 2, 1).contiguous().reshape(x3_shape)
         x4_residual = x4_residual.permute(0, 2, 1).contiguous().reshape(x4_shape)
 
-        bbox = self.head(x4_cls)
+        #bbox = self.head(x4_cls)
+        bbox = 0
 
         return [x1_residual, x2_residual, x3_residual, x4_residual], bbox
 

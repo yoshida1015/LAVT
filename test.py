@@ -55,7 +55,7 @@ def unnorm(img, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
         t.mul_(s).add_(m)
     return img 
 
-def evaluate(model, data_loader, bert_model, device):
+def evaluate(model, data_loader, bert_model, device, thr):
     model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ")
 
@@ -85,7 +85,8 @@ def evaluate(model, data_loader, bert_model, device):
                 embedding = last_hidden_states.permute(0, 2, 1)
                 output, _ = model(image, embedding, l_mask=attentions[:, :, j].unsqueeze(-1))
                 output = output.cpu()
-                output_mask = output.argmax(1).data.numpy()
+                #output_mask = output.argmax(1).data.numpy()
+                output_mask = (output > thr).float().numpy()
 
                 I, U = computeIoU(output_mask, target)
                 if U == 0:
@@ -180,7 +181,9 @@ def main(args):
     model = single_model.to(device)
     bert_model = single_bert_model.to(device)
 
-    evaluate(model, data_loader_test, bert_model, device=device)
+    print(f"threshold: {args.mask_thr}")
+    #evaluate(model, data_loader_test, bert_model, device=device, args.mask_thr)
+    evaluate(model, data_loader_test, bert_model, device, args.mask_thr)
 
 
 if __name__ == "__main__":

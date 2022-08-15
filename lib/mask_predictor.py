@@ -35,6 +35,7 @@ class SimpleDecoding_CoaT(nn.Module):
         self.relu2_2 = nn.ReLU()
 
         self.conv1_1 = nn.Conv2d(hidden_size, 2, 1)
+        self.conv1_binary = nn.Conv2d(2, 1, 1)
 
     def forward(self, x_c4, x_c3, x_c2, x_c1):
         # fuse Y4 and Y3
@@ -67,5 +68,7 @@ class SimpleDecoding_CoaT(nn.Module):
         x = self.conv2_2(x)
         x = self.bn2_2(x)
         x = self.relu2_2(x)
+        x = self.conv1_1(x)
 
-        return self.conv1_1(x)
+        return x
+        #return self.conv1_binary(x)
