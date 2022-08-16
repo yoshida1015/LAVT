@@ -551,8 +551,8 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
         #print(f"bbloss rate:{loss / (bb_loss*20)}")
         #print(f"boxinstloss rate:{loss / box_sp_loss}")
         #loss += bb_loss*20
-        #loss = bb_loss*20
-        loss += box_sp_loss
+        #loss += bb_loss*20
+        #loss += box_sp_loss
         #print(f"REC/S rate:{bb_loss*20/loss}")
         optimizer.zero_grad()  # set_to_none=True is only available in pytorch 1.6+
         loss.backward()
