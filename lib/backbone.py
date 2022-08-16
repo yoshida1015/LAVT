@@ -13,7 +13,8 @@ class MultiModalCoaT(nn.Module):
     def __init__(self,
                  frozen_stages=-1,
                  use_checkpoint=False,
-                 coat_type='lite_tiny'
+                 coat_type='lite_tiny',
+                 rec_enable = False
                  ):
         super().__init__()
 
@@ -51,9 +52,9 @@ class MultiModalCoaT(nn.Module):
             print('Loading pretrained CoaT weights from ' + pretrained)
             self.coat.load_checkpoint(pretrained)
 
-    def forward(self, x, l, l_mask):
+    def forward(self, x, l, l_mask, rec_enable):
         """Forward function."""
-        outs, bbox = self.coat(x, l, l_mask)
+        outs, bbox = self.coat(x, l, l_mask, rec_enable)
         return tuple(outs), bbox
 
     def train(self, mode=True):

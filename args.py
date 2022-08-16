@@ -62,19 +62,31 @@ def get_parser():
     parser.add_argument('--visualize', action='store_true', help='visualize result or not')
     parser.add_argument('--visual_dir', default='./qualitative_images/', 
                         help='path to store visualize images')
-    parser.add_argument('--use_bbox', action='store_true', help='use REC loss or not')
+    # Loss function
+    parser.add_argument('--CE_loss_en', action='store_true', help='CE loss or not')
+    parser.add_argument('--focal_enable', action='store_true', help='use Focal loss or not')
+    parser.add_argument('--loss_v2', action='store_true', help='use calc_loss_v2 or not')
+
+    # REC branch
+    parser.add_argument('--rec_enable', action='store_true', help='use REC head or not')
+    parser.add_argument('--box_f1_loss_en', action='store_true', help='use box F1 loss or not')
+    parser.add_argument('--iou_loss_en', action='store_true', help='use IoU loss or not')
     parser.add_argument('--clip', action='store_true', help='use clip features or not')
+
     # wandb run id
+    parser.add_argument('--memo', type=str, help='notification')
     parser.add_argument('--run_id', type=str, help='wandb run id', required=True)
 
     # box-supervised
-    parser.add_argument('--boxinst', action='store_true')
+    parser.add_argument('--boxinst_enable', action='store_true')
     parser.add_argument('--pairwise_size', default=3, type=int)
     parser.add_argument('--pairwise_dilation', default=2, type=int)
     parser.add_argument('--pairwise_color_thresh', default=0.3, type=float)
     parser.add_argument('--warmup', action='store_true')
     parser.add_argument('--warmup_iters', default=32, type=int)
     parser.add_argument('--mask_thr', default=0.35, type=float)
+    parser.add_argument('--bkg_prj_en', action='store_true')
+    parser.add_argument('--bkg_pairwise_en', action='store_true')
 
 
     return parser

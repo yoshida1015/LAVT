@@ -147,47 +147,23 @@ def add_bitmasks_from_boxes(args, images, image_masks, im_h, im_w, bboxes):
     #image_masks = image_masks[:, start::stride, start::stride]
     #print(f"image_masks: {image_masks.size()}")
 
-    #for im_i, per_im_gt_inst in enumerate(instances):
     for im_i in range(args.batch_size):
         images_lab = color.rgb2lab(images[im_i].byte().permute(1, 2, 0).cpu().numpy())
         images_lab = torch.as_tensor(images_lab, device=images.device, dtype=torch.float32)
         images_lab = images_lab.permute(2, 0, 1)[None]
-        #print(f"images_lab: {images_lab.size()}")
-        #print(f"image_masks: {image_masks.size()}")
         images_color_similarity = get_images_color_similarity(
             images_lab, image_masks[im_i],
             args.pairwise_size, args.pairwise_dilation
         )
-        #print(f"images_color_similarity: {images_color_similarity.size()}")
-
-        #per_im_boxes = per_im_gt_inst.gt_boxes.tensor
-        #per_im_boxes = bboxes[im_i].tensor
-        #print(f"bboxes: {bboxes[im_i]}")
         per_box = bboxes[im_i]
-        #print(f"per_im_boxes: {per_im_boxes.size()}")
-        #per_im_bitmasks = []
-        #per_im_bitmasks_full = []
         # only one bbox pre image in RES
-        #for per_box in per_im_boxes:
         bitmask_full = torch.zeros((im_h, im_w)).float().cuda()
-        #bitmask_full[int(per_box[1]):int(per_box[3] + 1), int(per_box[0]):int(per_box[2] + 1)] = 1.0
         bitmask_full[int(im_h * per_box[1]):int(im_h * per_box[3] + 1), int(im_w * per_box[0]):int(im_w * per_box[2] + 1)] = 1.0
-        #print(f"bitmask_full: {bitmask_full.size()}")
-        #bitmask = bitmask_full[start::stride, start::stride]
         # already downsampled in dataloader
         bitmask = bitmask_full
-        #print(f"bitmask: {bitmask.size()}")
-
-        #assert bitmask.size(0) * stride == im_h
-        #assert bitmask.size(1) * stride == im_w
-
-        #per_im_bitmasks.append(bitmask)
-        #per_im_bitmasks_full.append(bitmask_full)
         per_im_bitmasks = torch.unsqueeze(bitmask, 0)
         per_im_bitmasks_full = torch.unsqueeze(bitmask_full, 0)
 
-        #color_similarity = torch.stack(images_color_similarity, dim=0)
-        #color_similarity = torch.cat(images_color_similarity, dim=0)
         if im_i == 0:
             gt_bitmasks = per_im_bitmasks
             gt_bitmasks_full = per_im_bitmasks_full
@@ -196,15 +172,6 @@ def add_bitmasks_from_boxes(args, images, image_masks, im_h, im_w, bboxes):
             gt_bitmasks = torch.cat([gt_bitmasks, per_im_bitmasks], dim=0)
             gt_bitmasks_full = torch.cat([gt_bitmasks_full, per_im_bitmasks_full], dim=0)
             color_similarity = torch.cat([color_similarity, images_color_similarity], dim=0)
-        #image_color_similarity = torch.cat([
-        #    images_color_similarity for _ in range(len(per_im_gt_inst))
-        #], dim=0)
-        #print(f"gt_bitmasks: {gt_bitmasks.size()}")
-        #print(f"gt_bitmasks_full: {gt_bitmasks_full.size()}")
-        #print(f"color_similarity: {color_similarity.size()}")
-    #print(f"gt_bitmasks: {gt_bitmasks.size()}")
-    #print(f"gt_bitmasks_full: {gt_bitmasks_full.size()}")
-    #print(f"color_similarity: {color_similarity.size()}")
     per_im_gt = dict()
     per_im_gt["bitmasks"] = torch.unsqueeze(gt_bitmasks, 1)
     per_im_gt["bitmasks_full"] = torch.unsqueeze(gt_bitmasks_full, 1)
@@ -292,10 +259,16 @@ def IoU_loss(pred, gt):
 
 def get_transform(args):
     #transforms = [T.Resize((args.img_size, args.img_size), interpolation=T.InterpolationMode.BICUBIC),
-    transforms = [T.Resize(args.img_size, args.img_size),
-                  T.ToTensor(),
-                  T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-                  ]
+    if args.size_34:
+        transforms = [T.Resize(args.img_size, args.img_size*640/480),
+                      T.ToTensor(),
+                      T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                      ]
+    else:
+        transforms = [T.Resize(args.img_size, args.img_size),
+                      T.ToTensor(),
+                      T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                      ]
 
     return T.Compose(transforms)
 
@@ -309,10 +282,16 @@ def calc_loss(input, target, loss_func):
     loss = loss_func(bkg.squeeze(), (target-1)*-1) + loss_func(obj.squeeze(), target)
     return loss
 
-def rec_loss(pred, gt):
+def calc_loss_v2(input, target, loss_func):
+    bkg, obj = torch.split(input, 1, dim=1)
+    loss = loss_func((1-bkg).squeeze(), target) + loss_func(obj.squeeze(), target)
+    return loss
+
+def box_f1_loss(pred, gt):
     loss = torch.sum(torch.square(pred - gt))
     loss /= 100
     return loss
+
 ##### dice loss ####
 #def dice_loss(pred, target, smooth = 1.):
 #    pred = pred.contiguous()
@@ -461,18 +440,19 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
         embedding = last_hidden_states.permute(0, 2, 1)  # (B, 768, N_l) to make Conv1d happy
         attentions = attentions.unsqueeze(dim=-1)  # (batch, N_l, 1)
 
-        if args.use_bbox == True:
+        if args.rec_enable == True:
             output, bbox = model(image, embedding, l_mask=attentions)
-            #bb_loss = rec_loss(bbox, bbox_gt)
-            #bb_loss = IoU_loss(bbox, bbox_gt)
-            bb_loss = rec_loss(bbox, bbox_gt) + 0.05 * IoU_loss(bbox, bbox_gt)
+            bb_loss = 0
+            if args.box_f1_loss_en:
+                bb_loss += box_f1_loss(bbox, bbox_gt)
+            if args.iou_loss_en:
+                bb_loss += 0.05 * IoU_loss(bbox, bbox_gt)
             #print(f"bb_loss rate:{rec_loss(bbox, bbox_gt)/(0.05*IoU_loss(bbox, bbox_gt))}")
         else:
             output, _ = model(image, embedding, l_mask=attentions)
             bb_loss = 0
 
-        if args.boxinst == True:
-            #print("OK")
+        if args.boxinst_enable == True:
             #original_image_mask = [torch.ones_like(x[0], dtype=torch.float32) for x in image]
             ####for i in range(len(original_image_masks)):
             ####    im_h = batched_inputs[i]["height"]
@@ -495,25 +475,28 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
             bkg_scores = (1.0 - bkg).sigmoid()
             obj_scores = obj.sigmoid()
 
-            #output_scores = output.sigmoid()
-            #print(f"output_scores: {output_scores.size()}")
-            #print(f"bitmasks: {per_im_gt['bitmasks'].size()}")
-            #print(f"output: {output.size()}")
-            ###b_loss_prj_term = compute_project_term(bkg_scores, per_im_gt["bitmasks"])
+            if args.bkg_prj_en:
+                b_loss_prj_term = compute_project_term(bkg_scores, per_im_gt["bitmasks"])
+            else:
+                b_loss_prj_term = 0
+
+            if args.bkg_pairwise_en:
+                b_pairwise_losses = compute_pairwise_term(
+                    bkg, args.pairwise_size,
+                    args.pairwise_dilation
+                )
+                weights = (per_im_gt["color_similarity"] >= args.pairwise_color_thresh).float() * per_im_gt["bitmasks"].float()
+                b_loss_pairwise = (b_pairwise_losses * weights).sum() / weights.sum().clamp(min=1.0)
+                if args.warmup:
+                    warmup_factor = min(float(total_its) / float(args.warmup_iters), 1.0)
+                else:
+                    warmup_factor =  1.0
+                b_loss_pairwise = b_loss_pairwise * warmup_factor
+            else:
+                b_pairwise_losses = 0
+
+
             o_loss_prj_term = compute_project_term(obj_scores, per_im_gt["bitmasks"])
-
-            #b_pairwise_losses = compute_pairwise_term(
-            #    bkg, args.pairwise_size,
-            #    args.pairwise_dilation
-            #)
-
-            #weights = (per_im_gt["color_similarity"] >= args.pairwise_color_thresh).float() * per_im_gt["bitmasks"].float()
-            #b_loss_pairwise = (b_pairwise_losses * weights).sum() / weights.sum().clamp(min=1.0)
-            #if args.warmup:
-            #    warmup_factor = min(float(total_its) / float(args.warmup_iters), 1.0)
-            #else:
-            #    warmup_factor =  1.0
-            #b_loss_pairwise = b_loss_pairwise * warmup_factor
 
             o_pairwise_losses = compute_pairwise_term(
                 obj, args.pairwise_size,
@@ -527,33 +510,23 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
             else:
                 warmup_factor =  1.0
             o_loss_pairwise = o_loss_pairwise * warmup_factor
-            #box_sp_loss = b_loss_prj_term + b_loss_pairwise + o_loss_prj_term + o_loss_pairwise 
-            box_sp_loss = o_loss_prj_term + o_loss_pairwise 
+
+            box_sp_loss = b_loss_prj_term + b_loss_pairwise + o_loss_prj_term + o_loss_pairwise 
         else:
             box_sp_loss = 0
             
         #torch.autograd.set_detect_anomaly(True)
-        #loss = criterion(output, target)
-        #print(f"bbox_gt:{bbox_gt}")
-        #bb_loss = rec_loss(bbox, bbox_gt)
-        #loss = calc_loss(output, target, dice_loss)
-        #loss = calc_loss(output, target, sigmoid_focal_loss)
-        loss = criterion(output, target) + 0.001 * calc_loss(output, target, sigmoid_focal_loss)
-        ###output_ = torch.squeeze(output, 1).sigmoid()
-        #loss_1 = nn.functional.cross_entropy(output_, target) 
-        ###loss_1 = F.binary_cross_entropy(output_, target.float()) 
-        ###loss_2 = torchvision.ops.sigmoid_focal_loss(output_, target.float(), reduction="mean")
-        ###loss = loss_1 + loss_2
-        #print(f"loss_1: {loss_1}")
-        #print(f"loss_2: {loss_2}")
-        #print(f"loss rate:{loss_2 / loss_1}")
-        #print(f"loss rate:{criterion(output, target) / (0.001 * calc_loss(output, target, sigmoid_focal_loss))}")
-        #print(f"bbloss rate:{loss / (bb_loss*20)}")
-        #print(f"boxinstloss rate:{loss / box_sp_loss}")
-        #loss += bb_loss*20
-        #loss = bb_loss*20
+        if args.CE_loss_en:
+            loss = criterion(output, target) 
+        else:
+            loss = 0
+        if args.focal_enable:
+            if not args.loss_v2:
+                loss += 0.001 * calc_loss(output, target, sigmoid_focal_loss)
+            else:
+                loss += 0.001 * calc_loss_v2(output, target, sigmoid_focal_loss)
+        loss += bb_loss*20
         loss += box_sp_loss
-        #print(f"REC/S rate:{bb_loss*20/loss}")
         optimizer.zero_grad()  # set_to_none=True is only available in pytorch 1.6+
         loss.backward()
         optimizer.step()
@@ -569,11 +542,10 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
         gc.collect()
         torch.cuda.empty_cache()
 
-
-
-
 def main(args):
-    wandb.init(name=args.run_id, project='lavt')
+    print(args.memo)
+    runID = args.memo + "_" + args.run_id
+    wandb.init(name=runID, project='lavt')
 
     dataset, num_classes = get_dataset("train",
                                        get_transform(args=args),

@@ -34,7 +34,7 @@ def _segm_lavt(pretrained, args):
         mha = [1, 1, 1, 1]
 
     out_indices = (0, 1, 2, 3)
-    backbone = MultiModalCoaT(use_checkpoint=False, coat_type=args.coat_type)
+    backbone = MultiModalCoaT(use_checkpoint=False, coat_type=args.coat_type, rec_head=args.rec_enable)
     backbone.init_weights(pretrained=pretrained)
 
     #if pretrained:
