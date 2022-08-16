@@ -22,19 +22,19 @@ class MultiModalCoaT(nn.Module):
 
         self._freeze_stages()
         if coat_type == 'tiny':
-            self.coat = coat_tiny()
+            self.coat = coat_tiny(rec_enable)
         elif coat_type == 'mini':
-            self.coat = coat_mini()
+            self.coat = coat_mini(rec_enable)
         elif coat_type == 'small':
-            self.coat = coat_small()
+            self.coat = coat_small(rec_enable)
         elif coat_type == 'lite_tiny':
-            self.coat = coat_lite_tiny()
+            self.coat = coat_lite_tiny(rec_enable)
         elif coat_type == 'lite_mini':
-            self.coat = coat_lite_mini()
+            self.coat = coat_lite_mini(rec_enable)
         elif coat_type == 'lite_small':
-            self.coat = coat_lite_samll()
+            self.coat = coat_lite_samll(rec_enable)
         elif coat_type == 'lite_medium':
-            self.coat = coat_lite_medium()
+            self.coat = coat_lite_medium(rec_enable)
         else:
             assert False
 

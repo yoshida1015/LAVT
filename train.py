@@ -32,6 +32,18 @@ import wandb
 from skimage import color
 import sys
 
+import random
+
+def torch_fix_seed(seed=42):
+    # Python random
+    random.seed(seed)
+    # Numpy
+    np.random.seed(seed)
+    # Pytorch
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.use_deterministic_algorithms = True
 
 def dice_coefficient(x, target):
     eps = 1e-5
@@ -413,7 +425,7 @@ def evaluate(model, data_loader, bert_model, use_clip, mask_thr):
 
 
 def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, print_freq,
-                    iterations, bert_model, use_clip):
+                    iterations, bert_model, args):
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value}'))
@@ -433,7 +445,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
         sentences = sentences.squeeze(1)
         attentions = attentions.squeeze(1)
 
-        if use_clip:
+        if args.clip:
             last_hidden_states = bert_model(sentences)  # (6, 10, 512)
         else:
             last_hidden_states = bert_model(sentences, attention_mask=attentions)[0]  # (6, 10, 768)
@@ -441,7 +453,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
         attentions = attentions.unsqueeze(dim=-1)  # (batch, N_l, 1)
 
         if args.rec_enable == True:
-            output, bbox = model(image, embedding, l_mask=attentions)
+            output, bbox = model(image, embedding, l_mask=attentions, rec_enable=True)
             bb_loss = 0
             if args.box_f1_loss_en:
                 bb_loss += box_f1_loss(bbox, bbox_gt)
@@ -449,7 +461,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
                 bb_loss += 0.05 * IoU_loss(bbox, bbox_gt)
             #print(f"bb_loss rate:{rec_loss(bbox, bbox_gt)/(0.05*IoU_loss(bbox, bbox_gt))}")
         else:
-            output, _ = model(image, embedding, l_mask=attentions)
+            output, _ = model(image, embedding, l_mask=attentions, rec_enable=False)
             bb_loss = 0
 
         if args.boxinst_enable == True:
@@ -543,6 +555,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
         torch.cuda.empty_cache()
 
 def main(args):
+    torch_fix_seed(args.seed)
     print(args.memo)
     runID = args.memo + "_" + args.run_id
     wandb.init(name=runID, project='lavt')
@@ -633,11 +646,11 @@ def main(args):
         data_loader.sampler.set_epoch(epoch)
         if args.clip:
             train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, args.print_freq,
-                        iterations, clip_model, args.clip)
+                        iterations, clip_model, args)
             iou, overallIoU = evaluate(model, data_loader_test, clip_model, args.clip, args.mask_thr)
         else:
             train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, args.print_freq,
-                        iterations, bert_model, args.clip)
+                        iterations, bert_model, args)
             iou, overallIoU = evaluate(model, data_loader_test, bert_model, args.clip, args.mask_thr)
 
         #iou, overallIoU = evaluate(model, data_loader_test, bert_model)

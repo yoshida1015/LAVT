@@ -928,6 +928,7 @@ class CoaT(nn.Module):
                             num_heads=num_heads, mlp_ratios=mlp_ratios, **kwargs)
 
         #self.head = nn.Linear(embed_dims[3], 4) # CoaT-Lite series: Use feature of last scale for classification.
+        print(f"rec_head:{rec_enable}")
         if rec_enable:
             self.head = nn.Sequential(
                         nn.Linear(embed_dims[3], 128), # CoaT-Lite series: Use feature of last scale for classification.
@@ -1014,44 +1015,44 @@ class CoaT(nn.Module):
 # CoaT.
 @register_model
 def coat_tiny(rec_enable=False, **kwargs):
-    model = CoaT(patch_size=4, embed_dims=[152, 152, 152, 152], serial_depths=[2, 2, 2, 2], parallel_depth=6, num_heads=8, mlp_ratios=[4, 4, 4, 4], rec_enable, **kwargs)
+    model = CoaT(patch_size=4, embed_dims=[152, 152, 152, 152], serial_depths=[2, 2, 2, 2], parallel_depth=6, num_heads=8, mlp_ratios=[4, 4, 4, 4], rec_enable=rec_enable, **kwargs)
     model.default_cfg = _cfg_coat()
     return model
 
 @register_model
 def coat_mini(rec_enable=False, **kwargs):
-    model = CoaT(patch_size=4, embed_dims=[152, 216, 216, 216], serial_depths=[2, 2, 2, 2], parallel_depth=6, num_heads=8, mlp_ratios=[4, 4, 4, 4], rec_enable, **kwargs)
+    model = CoaT(patch_size=4, embed_dims=[152, 216, 216, 216], serial_depths=[2, 2, 2, 2], parallel_depth=6, num_heads=8, mlp_ratios=[4, 4, 4, 4], rec_enable=rec_enable, **kwargs)
     model.default_cfg = _cfg_coat()
     return model
 
 @register_model
 def coat_small(rec_enable=False, **kwargs):
-    model = CoaT(patch_size=4, embed_dims=[152, 320, 320, 320], serial_depths=[2, 2, 2, 2], parallel_depth=6, num_heads=8, mlp_ratios=[4, 4, 4, 4], rec_enable, **kwargs)
+    model = CoaT(patch_size=4, embed_dims=[152, 320, 320, 320], serial_depths=[2, 2, 2, 2], parallel_depth=6, num_heads=8, mlp_ratios=[4, 4, 4, 4], rec_enable=rec_enable, **kwargs)
     model.default_cfg = _cfg_coat()
     return model
 
 # CoaT-Lite.
 @register_model
 def coat_lite_tiny(rec_enable=False, **kwargs):
-    model = CoaT(patch_size=4, embed_dims=[64, 128, 256, 320], serial_depths=[2, 2, 2, 2], parallel_depth=0, num_heads=8, mlp_ratios=[8, 8, 4, 4], rec_enable, **kwargs)
+    model = CoaT(patch_size=4, embed_dims=[64, 128, 256, 320], serial_depths=[2, 2, 2, 2], parallel_depth=0, num_heads=8, mlp_ratios=[8, 8, 4, 4], rec_enable=rec_enable, **kwargs)
     model.default_cfg = _cfg_coat()
     return model
 
 @register_model
 def coat_lite_mini(rec_enable=False, **kwargs):
-    model = CoaT(patch_size=4, embed_dims=[64, 128, 320, 512], serial_depths=[2, 2, 2, 2], parallel_depth=0, num_heads=8, mlp_ratios=[8, 8, 4, 4], rec_enable, **kwargs)
+    model = CoaT(patch_size=4, embed_dims=[64, 128, 320, 512], serial_depths=[2, 2, 2, 2], parallel_depth=0, num_heads=8, mlp_ratios=[8, 8, 4, 4], rec_enable=rec_enable, **kwargs)
     model.default_cfg = _cfg_coat()
     return model
 
 @register_model
 def coat_lite_small(rec_enable=False, **kwargs):
-    model = CoaT(patch_size=4, embed_dims=[64, 128, 320, 512], serial_depths=[3, 4, 6, 3], parallel_depth=0, num_heads=8, mlp_ratios=[8, 8, 4, 4], rec_enable, **kwargs)
+    model = CoaT(patch_size=4, embed_dims=[64, 128, 320, 512], serial_depths=[3, 4, 6, 3], parallel_depth=0, num_heads=8, mlp_ratios=[8, 8, 4, 4], rec_enable=rec_enable, **kwargs)
     model.default_cfg = _cfg_coat()
     return model
 
 @register_model
 def coat_lite_medium(rec_enable=False, **kwargs):
-    model = CoaT(patch_size=4, embed_dims=[128, 256, 320, 512], serial_depths=[3, 6, 10, 8], parallel_depth=0, num_heads=8, mlp_ratios=[4, 4, 4, 4], rec_enable, **kwargs)
+    model = CoaT(patch_size=4, embed_dims=[128, 256, 320, 512], serial_depths=[3, 6, 10, 8], parallel_depth=0, num_heads=8, mlp_ratios=[4, 4, 4, 4], rec_enable=rec_enable, **kwargs)
     model.default_cfg = _cfg_coat()
     return model
 

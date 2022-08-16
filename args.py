@@ -88,6 +88,8 @@ def get_parser():
     parser.add_argument('--bkg_prj_en', action='store_true')
     parser.add_argument('--bkg_pairwise_en', action='store_true')
 
+    parser.add_argument('--seed', type=int, help='random seed')
+    parser.add_argument('--size_34', action='store_true')
 
     return parser
 
