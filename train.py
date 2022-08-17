@@ -540,7 +540,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
             else:
                 loss += 0.001 * calc_loss_v2(output, target, sigmoid_focal_loss)
         loss += bb_loss*20
-        loss += box_sp_loss
+        loss += box_sp_loss*args.bspv_scale
         optimizer.zero_grad()  # set_to_none=True is only available in pytorch 1.6+
         loss.backward()
         optimizer.step()
