@@ -415,13 +415,15 @@ def evaluate(model, data_loader, bert_model, use_clip, mask_thr):
     print('Final results:')
     print('Mean IoU is %.2f\n' % (mIoU * 100.))
     results_str = ''
+    prec_res = dict()
     for n_eval_iou in range(len(eval_seg_iou_list)):
         results_str += '    precision@%s = %.2f\n' % \
                        (str(eval_seg_iou_list[n_eval_iou]), seg_correct[n_eval_iou] * 100. / seg_total)
+        prec_res[str(n_eval_iou)] = seg_correct[n_eval_iou] * 100. / seg_total
     results_str += '    overall IoU = %.2f\n' % (cum_I * 100. / cum_U)
     print(results_str)
 
-    return 100 * iou, 100 * cum_I / cum_U
+    return 100 * iou, 100 * cum_I / cum_U, mIoU * 100., prec_res
 
 
 def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, print_freq,
@@ -505,7 +507,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
                     warmup_factor =  1.0
                 b_loss_pairwise = b_loss_pairwise * warmup_factor
             else:
-                b_pairwise_losses = 0
+                b_loss_pairwise = 0
 
 
             o_loss_prj_term = compute_project_term(obj_scores, per_im_gt["bitmasks"])
@@ -647,14 +649,20 @@ def main(args):
         if args.clip:
             train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, args.print_freq,
                         iterations, clip_model, args)
-            iou, overallIoU = evaluate(model, data_loader_test, clip_model, args.clip, args.mask_thr)
+            iou, overallIoU, mIoU, prec = evaluate(model, data_loader_test, clip_model, args.clip, args.mask_thr)
         else:
             train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoch, args.print_freq,
                         iterations, bert_model, args)
-            iou, overallIoU = evaluate(model, data_loader_test, bert_model, args.clip, args.mask_thr)
+            iou, overallIoU, mIoU, prec = evaluate(model, data_loader_test, bert_model, args.clip, args.mask_thr)
 
         #iou, overallIoU = evaluate(model, data_loader_test, bert_model)
         wandb.log({'oIoU':overallIoU})
+        wandb.log({'mIoU':mIoU})
+        wandb.log({'P@0.5':prec["0.5"]})
+        wandb.log({'P@0.6':prec["0.6"]})
+        wandb.log({'P@0.7':prec["0.7"]})
+        wandb.log({'P@0.8':prec["0.8"]})
+        wandb.log({'P@0.9':prec["0.9"]})
 
         print('Average object IoU {}'.format(iou))
         print('Overall IoU {}'.format(overallIoU))
