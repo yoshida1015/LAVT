@@ -419,7 +419,7 @@ def evaluate(model, data_loader, bert_model, use_clip, mask_thr):
     for n_eval_iou in range(len(eval_seg_iou_list)):
         results_str += '    precision@%s = %.2f\n' % \
                        (str(eval_seg_iou_list[n_eval_iou]), seg_correct[n_eval_iou] * 100. / seg_total)
-        prec_res[str(n_eval_iou)] = seg_correct[n_eval_iou] * 100. / seg_total
+        prec_res[str(eval_seg_iou_list[n_eval_iou])] = seg_correct[n_eval_iou] * 100. / seg_total
     results_str += '    overall IoU = %.2f\n' % (cum_I * 100. / cum_U)
     print(results_str)
 
@@ -562,7 +562,7 @@ def main(args):
     runID = args.memo + "_" + args.run_id
     wandb.init(name=runID, project='lavt')
 
-    dataset, num_classes = get_dataset("train",
+    dataset, num_classes = get_dataset("test",
                                        get_transform(args=args),
                                        args=args)
     dataset_test, _ = get_dataset("test",
