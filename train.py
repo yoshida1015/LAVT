@@ -562,7 +562,7 @@ def main(args):
     runID = args.memo + "_" + args.run_id
     wandb.init(name=runID, project='lavt')
 
-    dataset, num_classes = get_dataset("test",
+    dataset, num_classes = get_dataset("train",
                                        get_transform(args=args),
                                        args=args)
     dataset_test, _ = get_dataset("test",
