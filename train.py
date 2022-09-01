@@ -666,8 +666,9 @@ def main(args):
 
         print('Average object IoU {}'.format(iou))
         print('Overall IoU {}'.format(overallIoU))
-        save_checkpoint = (best_oIoU < overallIoU)
-        if save_checkpoint:
+        #save_checkpoint = (best_oIoU < overallIoU)
+        #if save_checkpoint:
+        if True:
             print('Better epoch: {}\n'.format(epoch))
             dict_to_save = {'model': single_model.state_dict(), 'bert_model': single_bert_model.state_dict(),
                             'optimizer': optimizer.state_dict(), 'epoch': epoch, 'args': args,
