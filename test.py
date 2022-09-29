@@ -79,16 +79,17 @@ def evaluate(model, data_loader, bert_model, device):
                                                    sentences.to(device), attentions.to(device)
             sentences = sentences.squeeze(1)
             attentions = attentions.squeeze(1)
-            target = target.cpu().data.numpy()
+            target_np = target.cpu().data.numpy()
             for j in range(sentences.size(-1)):
                 last_hidden_states = bert_model(sentences[:, :, j], attention_mask=attentions[:, :, j])[0]
                 embedding = last_hidden_states.permute(0, 2, 1)
                 output, _ = model(image, embedding, l_mask=attentions[:, :, j].unsqueeze(-1))
                 output = output.cpu()
-                output_mask = output.argmax(1).data.numpy()
-                #output_mask = (output > thr).float().numpy()
+                output_mask = output.argmax(1)
+                output_mask_np = output_mask.data.numpy()
+                #output_mask_np = (output_mask > thr).float().numpy()
 
-                I, U = computeIoU(output_mask, target)
+                I, U = computeIoU(output_mask_np, target_np)
                 if U == 0:
                     this_iou = 0.0
                 else:
@@ -96,30 +97,31 @@ def evaluate(model, data_loader, bert_model, device):
 
                 ### save img and inst
                 if args.visualize:
+                    pred_mask_color = (0, 255, 0)
+                    targ_mask_color = (255, 0, 0)
                     inst = tokenizer.decode(sentences[:, :, j][0])
-                    image_name = str(count)+ "_" + img_fname[0][5:-4]
-                    imshow(torchvision.utils.make_grid(unnorm(image[0].cpu())))
-                    plt.axis("off")
-                    plt.savefig(args.visual_dir + image_name, bbox_inches="tight", pad_inches=0.0)
-                    plt.imshow(output_mask[0])
-                    plt.axis("off")
-                    plt.savefig(args.visual_dir + image_name[:-4] + "_mask" + ".jpg", \
-                        bbox_inches="tight", pad_inches=0.0)
-                    plt.imshow(target[0])
-                    plt.axis("off")
-                    plt.savefig(args.visual_dir + image_name[:-4] + "_targ" + ".jpg", \
-                        bbox_inches="tight", pad_inches=0.0)
+                    ### save input image
+                    image_name = str(count)+ "_" + img_fname[0][5:]
+                    img_pil = torchvision.transforms.functional.to_pil_image(unnorm(image[0]))
+                    img_pil.save(args.visual_dir + image_name)
+                    img_pred = img_pil.copy()
+                    img_targ = img_pil.copy()
+                    ### save prediction image
+                    mask_pred = Image.fromarray(255*output_mask_np[0].astype(np.uint8))
+                    img_pred.paste(Image.new("RGB", img_pred.size, pred_mask_color), mask=mask_pred)
+                    img_pred.save(args.visual_dir + image_name[:-4] + "_mask" + ".jpg")
+                    ### save target image
+                    mask_targ = Image.fromarray(255*target_np[0].astype(np.uint8))
+                    img_targ.paste(Image.new("RGB", img_targ.size, targ_mask_color), mask=mask_targ)
+                    img_targ.save(args.visual_dir + image_name[:-4] + "_targ" + ".jpg")
                     count += 1
 
                     with open(f"{args.visual_dir}res_inst.txt", mode='a') as f:
                         print(f"{image_name};iou:{this_iou};sentence:{inst}", file=f)
 
-                #output_fname = str(cnt) + "_" + img_fname[0][5:]
-                #draw_bb(IMAGE_DIR + img_fname[0], bbox, "bbox_img/" + output_fname)
-                #cnt+=1
-                #with open(f"bbox_img/inst.txt", mode='a') as f:
-                #    inst = tokenizer.decode(sentences[:, :, j][0])
-                #    print(f"{output_fname}:{inst}", file=f)
+                    #draw_bb(IMAGE_DIR + img_fname[0], bbox, "bbox_img/" + image_name)
+                    #with open(f"bbox_img/inst.txt", mode='a') as f:
+                    #    print(f"{image_name}:{inst}", file=f)
 
                 
                 mean_IoU.append(this_iou)
@@ -130,7 +132,8 @@ def evaluate(model, data_loader, bert_model, device):
                     seg_correct[n_eval_iou] += (this_iou >= eval_seg_iou)
                 seg_total += 1
 
-            del image, target, sentences, attentions, last_hidden_states, embedding, output, output_mask
+            del image, target, sentences, attentions, last_hidden_states, embedding, \
+                output, output_mask, target_np, output_mask_np
 
     mean_IoU = np.array(mean_IoU)
     mIoU = np.mean(mean_IoU)
