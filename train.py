@@ -34,6 +34,8 @@ import sys
 
 import random
 
+from torchinfo import summary
+
 def torch_fix_seed(seed=42):
     # Python random
     random.seed(seed)
@@ -456,6 +458,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, lr_scheduler, epoc
 
         if args.rec_enable == True:
             output, bbox = model(image, embedding, l_mask=attentions, rec_enable=True)
+            #summary(model, input_data=[image, embedding, attentions])
             bb_loss = 0
             if args.box_f1_loss_en:
                 bb_loss += box_f1_loss(bbox, bbox_gt)
