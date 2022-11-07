@@ -102,22 +102,23 @@ def evaluate(model, data_loader, bert_model, device):
                     inst = tokenizer.decode(sentences[:, :, j][0])
                     ### save input image
                     image_name = str(count)+ "_" + img_fname[0][5:]
-                    img_pil = torchvision.transforms.functional.to_pil_image(unnorm(image[0]))
-                    img_pil.save(args.visual_dir + image_name)
-                    img_pred = img_pil.copy()
-                    img_targ = img_pil.copy()
-                    ### save prediction image
-                    mask_pred = Image.fromarray(255*output_mask_np[0].astype(np.uint8))
-                    img_pred.paste(Image.new("RGB", img_pred.size, pred_mask_color), mask=mask_pred)
-                    img_pred.save(args.visual_dir + image_name[:-4] + "_mask" + ".jpg")
-                    ### save target image
-                    mask_targ = Image.fromarray(255*target_np[0].astype(np.uint8))
-                    img_targ.paste(Image.new("RGB", img_targ.size, targ_mask_color), mask=mask_targ)
-                    img_targ.save(args.visual_dir + image_name[:-4] + "_targ" + ".jpg")
                     count += 1
+                    if True:
+                        img_pil = torchvision.transforms.functional.to_pil_image(unnorm(image[0]))
+                        img_pil.save(args.visual_dir + image_name)
+                        img_pred = img_pil.copy()
+                        img_targ = img_pil.copy()
+                        ### save prediction image
+                        mask_pred = Image.fromarray(100*output_mask_np[0].astype(np.uint8))
+                        img_pred.paste(Image.new("RGB", img_pred.size, pred_mask_color), mask=mask_pred)
+                        img_pred.save(args.visual_dir + image_name[:-4] + "_mask" + ".jpg")
+                        ### save target image
+                        mask_targ = Image.fromarray(100*target_np[0].astype(np.uint8))
+                        img_targ.paste(Image.new("RGB", img_targ.size, targ_mask_color), mask=mask_targ)
+                        img_targ.save(args.visual_dir + image_name[:-4] + "_targ" + ".jpg")
 
-                    with open(f"{args.visual_dir}res_inst.txt", mode='a') as f:
-                        print(f"{image_name};iou:{this_iou};sentence:{inst}", file=f)
+                        with open(f"{args.visual_dir}res_inst.txt", mode='a') as f:
+                            print(f"{image_name};iou:{this_iou};sentence:{inst}", file=f)
 
                     #draw_bb(IMAGE_DIR + img_fname[0], bbox, "bbox_img/" + image_name)
                     #with open(f"bbox_img/inst.txt", mode='a') as f:
