@@ -1,7 +1,7 @@
 date=`date -Iseconds`
 model_path=$1
-coat_type=$2
-img_size=$3
+coat_type=lite_medium
+img_size=480
 
 mkdir ./qualitative_images/reverie/$date
 
